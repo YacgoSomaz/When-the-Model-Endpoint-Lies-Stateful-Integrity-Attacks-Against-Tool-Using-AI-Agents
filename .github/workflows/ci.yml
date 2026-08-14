@@ -23,3 +23,5 @@ jobs:
         run: python scripts/verify_safe_artifact.py
       - name: Scan repository text
         run: python scripts/scan_secrets.py
+      - name: Compile helper scripts
+        run: python -m py_compile lab/app.py scripts/*.py

@@ -23,9 +23,12 @@ third party. Contact the repository owner privately and include:
 ## Secrets
 
 Never commit `.env`, API keys, SSH passwords, cookies, raw authorization
-headers, production logs, proprietary system prompts, or unredacted user data.
-Rotate any credential that has appeared in chat, terminal history, screenshots,
-or a previous commit before sharing the repository with another person.
+headers, production logs, or unredacted user data. A full product prompt may
+only be stored in this private repository after identity/secret redaction, with
+source and redacted hashes, and must receive legal/vendor review before public
+release. Rotate any credential that has appeared in chat, terminal history,
+screenshots, or a previous commit before sharing the repository with another
+person.
 
 ## Public deployment warning
 

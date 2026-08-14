@@ -1,0 +1,22 @@
+{
+  "source_sha256": "055638dd0898e2367cb4cbfb695d4f32f2dfc2f13aad76e9444c45c644e7a049",
+  "redacted_sha256": "99456c412d43c4ee63efe038f2b4080e32003bb1d06a76d1acd636b26ba85828",
+  "source_bytes": 158884,
+  "redacted_bytes": 157435,
+  "message_count": 2,
+  "message_content_characters": [
+    41977,
+    11265
+  ],
+  "tool_count": 24,
+  "redaction_counts": {
+    "api_key": 0,
+    "bearer": 0,
+    "email": 0,
+    "windows_home": 56,
+    "unix_home": 3,
+    "ipv4": 0,
+    "explicit_literal": 56
+  },
+  "notes": "Semantics and JSON structure preserved; identity and secret-like values replaced."
+}

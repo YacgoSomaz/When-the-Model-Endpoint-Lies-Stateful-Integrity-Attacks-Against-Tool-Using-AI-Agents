@@ -16,6 +16,8 @@ PATTERNS = {
     "private key": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     "IPv4 address": re.compile(r"(?<![\d.])(?!(?:127\.0\.0\.1|0\.0\.0\.0)(?!\d))(?:\d{1,3}\.){3}\d{1,3}(?![\d.])"),
     "Windows user path": re.compile(r"[A-Za-z]:\\Users\\(?!<)[^\\\r\n]+\\", re.I),
+    "mainland phone": re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"),
+    "Chinese resident ID": re.compile(r"(?<!\d)\d{17}[0-9Xx](?!\d)"),
 }
 
 
