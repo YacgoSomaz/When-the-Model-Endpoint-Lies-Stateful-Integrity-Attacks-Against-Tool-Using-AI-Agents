@@ -1,0 +1,8 @@
+{
+  "name": "AI Integrity Lab Safe Demo Package",
+  "version": "1.0.0",
+  "purpose": "Harmless download-only integrity demonstration",
+  "executable": false,
+  "installable": false,
+  "network_access": false
+}
