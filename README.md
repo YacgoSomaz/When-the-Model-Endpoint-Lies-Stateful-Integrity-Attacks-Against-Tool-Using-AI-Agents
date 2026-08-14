@@ -1,85 +1,278 @@
-# 当模型端点不可信
+<!-- BEAUTIFIED -->
 
-这是一个研究 AI Agent 安全问题的私有项目。
+<h1 align="center">当模型端点不可信</h1>
 
-如果你不是安全专家，可以先记住一句话：
+<p align="center">
+  <strong>观察、复现并防御模型通信链路对工具型 AI Agent 的影响</strong>
+  <br />
+  <em>请求可见性 · 响应完整性 · 多轮上下文 · 工具执行边界</em>
+</p>
 
-> **AI 软件界面上写着“DeepSeek”或显示着官方 API 地址，不代表它送给 AI 的内容、收到的回答，中途一定没有被别人看见或改过。**
+<p align="center">
+  <img src="https://img.shields.io/badge/状态-私有研究-6f42c1?style=flat" alt="Private Research" />
+  <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat&logo=python&logoColor=white" alt="Python 3.11+" />
+  <img src="https://img.shields.io/badge/载荷-仅无害文件-2ea44f?style=flat" alt="Inert Artifacts Only" />
+  <img src="https://img.shields.io/badge/授权-All_Rights_Reserved-555?style=flat" alt="All Rights Reserved" />
+</p>
 
-## 用快递来理解
+<p align="center">
+  <a href="#三十秒看懂这个问题"><img src="https://img.shields.io/badge/先看结论-0969da?style=for-the-badge" alt="先看结论" /></a>
+  <a href="evidence/private/README.md"><img src="https://img.shields.io/badge/查看脱敏证据-b62324?style=for-the-badge" alt="查看脱敏证据" /></a>
+  <a href="#快速开始"><img src="https://img.shields.io/badge/运行实验台-1f883d?style=for-the-badge" alt="运行实验台" /></a>
+</p>
 
-你让一个 AI Agent 帮你做事，就像寄出一个包裹：
+<p align="center">
+  面向读者：<strong>README</strong> ·
+  <a href="AI_README.md">AI 索引</a> ·
+  <a href="TECHNICAL_README.md">技术文档</a> ·
+  <a href="docs/PAPER_OUTLINE.md">论文提纲</a>
+</p>
 
-1. 你把要求交给 AI 软件；
-2. AI 软件把要求发给模型；
-3. 模型给出回答；
-4. Agent 根据回答读文件、写代码、访问网页或调用其他工具。
+---
 
-如果中间经过了一个第三方中转站，这个中转站就像一个能够拆开包裹的中转仓：
+## 三十秒看懂这个问题
 
-- 它可能看到你和 AI 的完整聊天；
-- 它可能看到软件偷偷附带的系统提示词；
-- 它可能看到 Agent 有哪些工具、每个工具怎样使用；
-- 它可能修改你发给模型的话；
-- 它也可能修改模型交给 Agent 的工具参数和回答。
+你在 Agent 界面里输入一句“你好”，模型真正收到的内容，未必仍然是“你好”。
 
-HTTPS 仍然有用，但它保护的是“客户端到中转站”和“中转站到模型”这两段连接。只要中转站是实际接收请求的一方，它通常就能看到这一跳里的明文。
+许多 AI 软件不会让你的电脑直接连接模型服务。请求会先经过软件后端、企业网关或第三方 OpenAI 兼容中转，再到达模型。如果其中某一层能够读取并改写 JSON，它看到的就不只是聊天框里的最后一句话。
 
-## 我们实际做了什么
+| 你在界面里看到的 | 中转层实际可能接触的 |
+|---|---|
+| 一句用户消息 | 完整历史对话与系统提示词 |
+| 一个模型名称 | 实际模型地址、参数与回退配置 |
+| 一段自然语言回答 | `tool_calls`、工具参数与工具结果 |
+| 一次发送按钮 | 多轮 Agent 循环中的每一次模型调用 |
 
-我们只在自己的账号、服务器、API Key 和电脑上进行了一次无害实验：
+**界面是展示层，网络路径才是信任边界。** 当模型只能回答文字时，这主要是隐私与内容完整性问题；当模型可以驱动终端、文件、浏览器和其他工具时，它还会进入执行安全的范围。
 
-1. 在 Agent 客户端中只输入一句普通问候；
-2. 自己控制的实验中转站在发送给模型前修改了任务；
-3. 新任务只要求下载一个无害 ZIP 到专用测试目录；
-4. ZIP 里只有一个说明文件和一个 JSON 文件；
-5. Agent 下载了文件，随后计算 SHA-256；
-6. 没有解压、运行、安装、提权或绕过安全软件。
+## 我们观察到了什么
 
-这次实验说明：**如果模型通信通道不可信，Agent 的工具计划可能与用户在界面中输入的内容不同。**
+在研究者自有账号、自有服务器、自有 API Key 和自有电脑组成的受控环境中，我们完成了一次无害实验：
 
-但它还不能证明某个具体产品存在已确认漏洞，也不能证明危险程序可以静默安装。我们仍需要更多对照实验、专业人士复核和厂商沟通。
+```text
+用户可见输入：“你好”
+        ↓
+授权实验网关：把请求改为“下载无害 ZIP，并核对哈希”
+        ↓
+模型：生成标准工具调用
+        ↓
+Agent：把 ZIP 保存到专用测试目录，并计算 SHA-256
+```
 
-## 为什么保存完整提示词
+ZIP 中只有 `README.txt` 和 `manifest.json`。实验没有解压、运行、安装、提权、持久化，也没有绕过操作系统或安全产品。
 
-很多人以为中转站只能看见自己最后输入的一句话。实际的 Agent 请求可能非常大，其中还会包含：
+这次观察支持一个有限但重要的结论：
 
-- 厂商写入的系统提示词；
-- 当前对话和以前的上下文；
-- 工具名称、参数说明和调用规则；
-- 工具执行结果；
-- 工作区、操作系统和运行环境信息。
+> **如果模型通信链路的完整性失效，Agent 形成的工具计划可能与用户在界面中表达的意图不同。**
 
-本仓库保存了一份**保持结构与语义、删除身份信息后的完整 WorkBuddy 请求样本**，用于证明这个数据暴露面。它不会包含 API Key、令牌、真实用户名、真实用户目录或账号信息。在公开项目前，这份材料还必须经过厂商和专业安全人员复核。
+它尚不能证明某个具体产品存在已确认漏洞，也不能证明危险程序能够静默安装。产品级结论仍需对照实验、版本确认、独立复核和厂商沟通。
 
-## 普通用户可以做什么
+## 一次真实请求里有什么
 
-- 不要因为软件显示了官方模型名称，就自动相信真实请求路径；
-- API Key 尽量使用低额度、短期、专用并可随时撤销的 Key；
-- Agent 要求下载、运行、安装或访问陌生网站时，停下来核对真实 URL；
-- 把“下载”和“执行/安装”当成两次不同授权；
-- 给 Agent 最小权限，不要默认开放整个电脑、管理员权限和所有账号；
-- 重要环境优先使用可信厂商、可信网络路径和可审计日志。
+仓库保存了两份保持结构与语义、删除身份信息后的完整 WorkBuddy 请求样本。主样本包含：
 
-## 开发者和厂商可以做什么
+| 内容 | 实际规模 |
+|---|---:|
+| 消息 | 2 条 |
+| 系统提示词 | 原始内容约 42,079 字符 |
+| 用户包装与上下文 | 原始内容约 11,313 字符 |
+| 工具定义 | 24 个完整 schema |
+| 其他字段 | 模型、流式参数、Token 上限与推理配置 |
 
-- 把模型回答当作不可信输入，而不是系统命令；
-- 在本地比对“用户真正同意的事情”和“模型要求工具做的事情”；
-- 审批页面显示最终真实 URL、文件路径、命令和哈希；
-- 限制 Agent 能访问的域名、目录和程序；
-- 对模型端点、请求和响应提供可验证的来源与完整性证明；
-- 不要把用户看到的界面文字当作安全证据。
+这说明，把模型 URL 指向一个中转服务，可能同时带来三类风险：
 
-## 按你的身份继续阅读
+- **机密性**：系统提示词、用户对话、工具定义和环境信息可能被读取；
+- **完整性**：请求、回答或工具参数可能被改写；
+- **授权边界**：被改写的模型输出可能继续影响 Agent 的本地工具。
 
-- 普通读者：继续看[当前发现](docs/FINDINGS.md)和[公开视频分镜](docs/VIDEO_STORYBOARD.md)
-- 开发者/安全研究者：看[技术版 README](TECHNICAL_README.md)、[威胁模型](docs/THREAT_MODEL.md)和[防御方案](docs/MITIGATIONS.md)
-- 其他 AI：读取[AI_README.md](AI_README.md)
-- 厂商安全团队：看[私下建议书模板](docs/VENDOR_ADVISORY_TEMPLATE.md)和[负责任披露流程](RESPONSIBLE_DISCLOSURE.md)
-- 查看脱敏完整请求：[WorkBuddy 完整请求样本说明](evidence/private/README.md)
+[阅读提示词暴露原理](docs/PROMPT_CONFIDENTIALITY.md) · [查看完整脱敏样本](evidence/private/README.md) · [核对证据清单](docs/EVIDENCE_MANIFEST.md)
 
-## 我们的愿望
+## 实验台能做什么
 
-这个项目不是为了教人伤害别人，而是希望在 AI Agent 变得更有能力之前，让大家先看见它的信任边界。
+| 能力 | 用途 |
+|---|---|
+| 双向人工审批 | 请求发给模型前暂停；回答交给客户端前再次暂停 |
+| 原文与修改后内容对照 | 区分客户端实际发送、规则改写和人工编辑 |
+| 会话级持续规则 | 观察修改如何进入 Agent 后续轮次的上下文 |
+| 流式兼容 | 上游完整缓冲供检查，批准后重新封装为 SSE |
+| 无害实验载荷 | 只生成包含文本与 JSON 的 ZIP，不包含程序或脚本 |
+| 自动安全检查 | 运行单元测试、载荷验证、敏感信息扫描与源码编译 |
 
-我们希望最后交付的不只是一次“吓人的演示”，而是一套普通人能听懂、研究者能复现、厂商能采用的解决办法。在找到较成熟的防御、完成同行交流和厂商沟通以前，仓库保持私有。
+## 快速开始
+
+该实验台只使用 Python 标准库，默认监听 `127.0.0.1:8001`。
+
+### 环境要求
+
+- Python 3.11+
+- 一个专用于测试、低额度且可撤销的 OpenAI 兼容 API Key
+- 研究者拥有或已获得书面授权的客户端、模型账号与终端
+
+### 配置
+
+```powershell
+cd lab
+$env:LAB_GATEWAY_URL = "https://api.deepseek.com/chat/completions"
+$env:LAB_ACKNOWLEDGEMENT = "CONTROLLED_RESEARCH_ONLY"
+$env:LOG_VIEWER_USER = "researcher"
+$env:LOG_VIEWER_PASSWORD = "请替换为长随机密码"
+```
+
+### 生成并验证无害载荷
+
+```powershell
+python ..\scripts\build_safe_artifact.py
+python ..\scripts\verify_safe_artifact.py
+```
+
+### 启动
+
+```powershell
+python app.py
+```
+
+打开 `http://127.0.0.1:8001/console`。不要把控制台直接暴露到公网，也不要使用生产账号、生产 Key 或真实用户数据。
+
+## 使用方法
+
+### 浏览器演示
+
+1. 打开 `http://127.0.0.1:8001/chat`；
+2. 在另一个窗口打开 `/console`；
+3. 从聊天页发起测试请求；
+4. 在控制台检查并批准请求与回答。
+
+### Agent 客户端
+
+将 OpenAI 兼容地址配置为：
+
+```text
+http://127.0.0.1:8001/workbuddy/v1/chat/completions
+```
+
+每次实验结束后，撤销临时 Key、停止服务并删除测试目录。完整步骤与限制见 [`lab/README.md`](lab/README.md)。
+
+## 架构
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'fontSize': '14px', 'lineColor': '#64748B'}}}%%
+flowchart LR
+    A["用户 / Agent 客户端"] -->|"OpenAI 兼容 JSON"| B["本地审批网关"]
+    B --> C{"批准请求？"}
+    C -->|"是"| D["模型服务"]
+    C -->|"否"| X["停止或等待"]
+    D --> E{"批准响应？"}
+    E -->|"是"| A
+    E -->|"否"| X
+    B <--> F["会话规则与变更审计<br/>仅内存"]
+    B --> G["无害 ZIP<br/>文本 + JSON"]
+
+    classDef client fill:#3B82F6,stroke:#2563EB,color:#fff,stroke-width:2px
+    classDef gateway fill:#F59E0B,stroke:#D97706,color:#fff,stroke-width:2px
+    classDef decision fill:#F97316,stroke:#EA580C,color:#fff,stroke-width:2px
+    classDef external fill:#F43F5E,stroke:#E11D48,color:#fff,stroke-width:2px
+    classDef data fill:#8B5CF6,stroke:#7C3AED,color:#fff,stroke-width:2px
+    classDef terminal fill:#64748B,stroke:#475569,color:#fff,stroke-width:2px
+
+    class A client
+    class B gateway
+    class C,E decision
+    class D external
+    class F,G data
+    class X terminal
+```
+
+请求状态依次经过 `pending_request → waiting_upstream → pending_response → delivered`。任何阶段都可能因错误、拒绝或超时终止。
+
+## 配置
+
+| 环境变量 | 作用 | 默认值 |
+|---|---|---|
+| `LAB_GATEWAY_URL` | 上游 OpenAI 兼容 Chat Completions 地址 | 无，必须设置 |
+| `LAB_BIND_HOST` | 实验台监听地址 | `127.0.0.1` |
+| `LAB_PORT` | 实验台端口 | `8001` |
+| `LAB_ACKNOWLEDGEMENT` | 显式启用受控实验端点 | 必须为 `CONTROLLED_RESEARCH_ONLY` |
+| `LOG_VIEWER_USER` | 控制台 Basic Auth 用户名 | 空 |
+| `LOG_VIEWER_PASSWORD` | 控制台 Basic Auth 密码 | 空 |
+
+如果控制台会被本机之外的任何人访问，必须设置强认证并进行单独安全审查。
+
+## API
+
+| 方法 | 路径 | 用途 | 认证 |
+|---|---|---|---|
+| `GET` | `/chat` | 普通聊天演示页 | 无 |
+| `GET` | `/console` | 请求与回答审批控制台 | 可配置 Basic Auth |
+| `POST` | `/openai/v1/chat/completions` | 网页聊天请求入口 | Bearer Key |
+| `POST` | `/workbuddy/v1/chat/completions` | 固定 Agent 实验会话 | Bearer Key |
+| `POST` | `/workbuddy/session/<id>/v1/chat/completions` | 独立 Agent 实验会话 | Bearer Key |
+| `GET` | `/artifacts/safe-demo-package.zip` | 返回本地生成的无害 ZIP | 无 |
+
+控制台相关 `/api/console/*` 端点只用于本地研究界面，不应作为公共 API 暴露。
+
+## 目录结构
+
+```text
+.
+├── lab/                         # 本地审批网关、中文控制台与单元测试
+│   ├── app.py                   # OpenAI 兼容实验服务
+│   ├── console.html             # 请求/响应审批界面
+│   └── safe-demo-package/       # 无害载荷的文本源文件
+├── scripts/                     # 构建、验证、脱敏与敏感信息扫描
+├── evidence/
+│   ├── experiment-001/          # 首次受控观察的脱敏时间线
+│   └── private/                 # 完整提示词样本与哈希元数据
+├── docs/                        # 威胁模型、发现、防御、论文与披露材料
+├── AI_README.md                 # 面向 AI 的结构化研究索引
+├── TECHNICAL_README.md          # 更完整的技术说明
+├── ETHICS.md                    # 允许与禁止的实验边界
+└── SECURITY.md                  # 仓库与实验台安全规则
+```
+
+## 技术栈
+
+| 层 | 技术 | 用途 |
+|---|---|---|
+| 服务端 | Python 3 标准库 | HTTP 服务、上游转发、内存状态与规则应用 |
+| 前端 | HTML、CSS、原生 JavaScript | 聊天页与中文审批控制台 |
+| 协议 | OpenAI Chat Completions、SSE | Agent 接入与流式响应重组 |
+| 测试 | `unittest` | 非流式、流式、会话规则与 Key 隔离测试 |
+| 自动化 | GitHub Actions | 构建无害载荷、运行测试、扫描敏感信息 |
+
+## 安全边界
+
+本项目允许扩大**观测深度和防御覆盖**，不允许扩大伤害能力。
+
+允许：自有或明确授权系统、不可执行文件、专用工作区、哈希验证、可撤销且可审计的模拟。
+
+禁止：真实恶意软件、持久化、权限提升、凭据获取、关闭安全机制、未授权第三方系统、诱导真实用户执行未知文件。
+
+完整规则见 [`ETHICS.md`](ETHICS.md) 和 [`RESPONSIBLE_DISCLOSURE.md`](RESPONSIBLE_DISCLOSURE.md)。
+
+## 测试与 CI
+
+```powershell
+python -m unittest discover -s lab -p "test_*.py" -v
+python scripts/verify_safe_artifact.py
+python scripts/scan_secrets.py
+```
+
+GitHub Actions 会在每次推送和 Pull Request 中运行相同检查。该实验台是研究原型，不是生产网关，也不提供公网部署保证。
+
+## 参与研究
+
+提交变更前请阅读 [`CONTRIBUTING.md`](CONTRIBUTING.md)。所有贡献必须改善测量、复现、脱敏或防御；不得加入可执行载荷、凭据访问、持久化、隐蔽行为或第三方目标。
+
+## 当前授权状态
+
+仓库尚未提供开源许可证。当前默认保留全部权利，详见 [`NOTICE.md`](NOTICE.md)；只有在同行复核、厂商沟通、脱敏和公开安全审查完成后，才会决定是否选择开源许可证。
+
+## 我们希望走到哪里
+
+这个项目最终不应停在一次引人注意的演示。
+
+我们希望把问题讲到普通用户能够理解，把证据整理到研究者能够复核，把建议写到厂商可以落实。只有当防御方案、专业交流与负责任披露都准备充分时，项目才会考虑公开。
+
+---
+
+README 编排参考 [`general-readme-skill`](https://github.com/KieranGao/general-readme-skill)。研究结论、数据与安全边界均来自本仓库现有源码和证据。
