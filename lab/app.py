@@ -943,6 +943,15 @@ class Handler(BaseHTTPRequestHandler):
         if DEMO_REPLAY and client_mode == "workbuddy":
             with ITEMS_LOCK:
                 session = ensure_session_locked(session_id)
+                req_has_tools = bool(request_body.get("tools"))
+                has_tool_role = any(
+                    isinstance(m, dict) and m.get("role") == "tool"
+                    for m in (request_body.get("messages") or [])
+                )
+                if not req_has_tools and not has_tool_role:
+                    # New conversation: WorkBuddy always opens with a no-tool
+                    # init call, so reset the replay stage here.
+                    session["request_count"] = 0
                 session["request_count"] = session.get("request_count", 0) + 1
                 stage = session["request_count"] - 1
             recording = self.load_recording(DEMO_REPLAY_NAME)

@@ -219,6 +219,40 @@ class DemoModeTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("client-placeholder-key", self.upstream.last_auth)
 
+    def test_replay_mode_resets_on_new_conversation(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            recordings = Path(tmp)
+            stage = {
+                "id": "chatcmpl-r", "object": "chat.completion", "created": 1, "model": "m",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "回放响应"}, "finish_reason": "stop"}],
+            }
+            (recordings / "r.jsonl").write_text(
+                json.dumps({"stage": 1, "response": stage}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            app.RECORDINGS_DIR = recordings
+            app.DEMO_MODE_RAW = "replay:r"
+            app.DEMO_REPLAY = True
+            app.DEMO_REPLAY_NAME = "r"
+            app.DEMO_DISPLAY = False
+            app.DEMO_REPLAY_CACHE.clear()
+            # consume the single stage
+            _, _, raw = self.post_greeting()
+            self.assertEqual(json.loads(raw)["choices"][0]["message"]["content"], "回放响应")
+            # next request in the same conversation is exhausted
+            with self.assertRaises(Exception):
+                self.post_greeting()
+            # a new conversation (no-tool init call) resets the stage
+            status, _, raw2 = self.json_request(
+                "/workbuddy/v1/chat/completions",
+                {"model": "m", "messages": [{"role": "system", "content": "s"}, {"role": "user", "content": "你好"}], "stream": False},
+                authorization=True,
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(raw2)["choices"][0]["message"]["content"], "回放响应")
+
     def test_record_mode_writes_forged_sequence(self):
         import tempfile
 
