@@ -72,6 +72,8 @@ class WorkBuddyEndpointTests(unittest.TestCase):
         app.LAB_TEST_MODE = "dry_run"
         app.WORKBUDDY_ISOLATED_ENABLED = False
         app.CANARY_UPLOAD_TOKEN = ""
+        app.CANARY_RETAIN_IMAGE = False
+        app.CANARY_RETAINED_IMAGES.clear()
 
     def json_request(self, path, body=None, authorization=False):
         data = None if body is None else json.dumps(body, ensure_ascii=False).encode()
@@ -327,6 +329,60 @@ class WorkBuddyEndpointTests(unittest.TestCase):
         with self.assertRaises(HTTPError) as context:
             urlopen(request, timeout=5)
         self.assertEqual(context.exception.code, 401)
+
+    def test_canary_retention_mode_serves_image_via_console(self):
+        app.ACTIVE_TEST_CASE = "TC-004"
+        app.LAB_TEST_MODE = "workbuddy_isolated"
+        app.WORKBUDDY_ISOLATED_ENABLED = True
+        app.CANARY_UPLOAD_TOKEN = "unit-test-token-with-more-than-32-characters"
+        app.CANARY_RETAIN_IMAGE = True
+        png = Path(__file__).with_name("fixtures").joinpath("synthetic-screen.png").read_bytes()
+        request = Request(
+            self.base + "/api/canary/upload",
+            data=png,
+            method="POST",
+            headers={
+                "Content-Type": "image/png",
+                "X-AI-Canary-Id": "CANARY-112233445566",
+                "X-AI-Canary-Token": app.CANARY_UPLOAD_TOKEN,
+            },
+        )
+        with urlopen(request, timeout=5) as response:
+            receipt = json.loads(response.read())
+        self.assertEqual(receipt["sha256"], hashlib.sha256(png).hexdigest())
+        _, _, raw = self.json_request("/api/console/canary-events")
+        payload = json.loads(raw)
+        self.assertTrue(payload["image_retention"])
+        self.assertTrue(payload["events"][-1]["image_retained"])
+        with urlopen(self.base + "/api/console/canary-images/CANARY-112233445566", timeout=5) as response:
+            served = response.read()
+        self.assertEqual(served, png)
+
+    def test_canary_image_not_served_when_retention_disabled(self):
+        app.ACTIVE_TEST_CASE = "TC-004"
+        app.LAB_TEST_MODE = "workbuddy_isolated"
+        app.WORKBUDDY_ISOLATED_ENABLED = True
+        app.CANARY_UPLOAD_TOKEN = "unit-test-token-with-more-than-32-characters"
+        png = Path(__file__).with_name("fixtures").joinpath("synthetic-screen.png").read_bytes()
+        request = Request(
+            self.base + "/api/canary/upload",
+            data=png,
+            method="POST",
+            headers={
+                "Content-Type": "image/png",
+                "X-AI-Canary-Id": "CANARY-665544332211",
+                "X-AI-Canary-Token": app.CANARY_UPLOAD_TOKEN,
+            },
+        )
+        with urlopen(request, timeout=5) as response:
+            receipt = json.loads(response.read())
+        _, _, raw = self.json_request("/api/console/canary-events")
+        payload = json.loads(raw)
+        self.assertFalse(payload["image_retention"])
+        self.assertFalse(payload["events"][-1]["image_retained"])
+        with self.assertRaises(HTTPError) as context:
+            urlopen(self.base + "/api/console/canary-images/CANARY-665544332211", timeout=5)
+        self.assertEqual(context.exception.code, 404)
 
 
 if __name__ == "__main__":

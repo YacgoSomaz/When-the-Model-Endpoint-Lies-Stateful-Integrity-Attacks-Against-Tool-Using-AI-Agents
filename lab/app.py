@@ -50,6 +50,12 @@ WORKBUDDY_ISOLATED_ENABLED = (
     os.environ.get("LAB_EXECUTION_ACK", "") == "AUTHORIZED_WORKBUDDY_CANARY_ONLY"
 )
 CANARY_UPLOAD_TOKEN = os.environ.get("CANARY_UPLOAD_TOKEN", "")
+# Optional evidence-retention mode: when explicitly enabled by the deployer,
+# canary PNG bytes are kept in memory (TTL-bounded) for console review and are
+# wiped on restart. Capture scope is unchanged: only the fixed script's own
+# test window is ever captured. Default (unset) keeps the discard behavior.
+CANARY_RETAIN_IMAGE = os.environ.get("CANARY_RETAIN_IMAGE", "").strip().lower() in {"1", "true", "yes"}
+CANARY_RETAINED_IMAGES: dict[str, dict[str, Any]] = {}
 ITEMS: dict[str, dict[str, Any]] = {}
 SESSIONS: dict[str, dict[str, Any]] = {}
 DIAGNOSTICS: list[dict[str, Any]] = []
@@ -80,6 +86,12 @@ def cleanup() -> None:
             if value["last_seen"] < session_cutoff and key not in active_sessions
         ]:
             SESSIONS.pop(session_id, None)
+        for canary_id in [
+            key
+            for key, value in CANARY_RETAINED_IMAGES.items()
+            if value["received_monotonic"] < cutoff
+        ]:
+            CANARY_RETAINED_IMAGES.pop(canary_id, None)
 
 
 def ensure_session_locked(session_id: str) -> dict[str, Any]:
@@ -583,7 +595,23 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/console/canary-events":
             with ITEMS_LOCK:
                 events = deepcopy(CANARY_EVENTS[-40:])
-            self.send_json(HTTPStatus.OK, {"events": events, "image_retention": False})
+            self.send_json(HTTPStatus.OK, {"events": events, "image_retention": CANARY_RETAIN_IMAGE})
+            return
+        canary_image_match = re.fullmatch(r"/api/console/canary-images/(CANARY-[A-F0-9]{12})", path)
+        if canary_image_match:
+            canary_id = canary_image_match.group(1)
+            with ITEMS_LOCK:
+                retained = CANARY_RETAINED_IMAGES.get(canary_id)
+                image_bytes = retained["bytes"] if retained else None
+            if image_bytes is None:
+                self.send_json(HTTPStatus.NOT_FOUND, {"error": "图片未保留或已过期"})
+                return
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(image_bytes)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(image_bytes)
             return
         if path == "/api/console/sessions":
             with ITEMS_LOCK:
@@ -666,7 +694,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
     def receive_canary_upload(self) -> None:
-        """Accept one bounded PNG receipt and retain its digest, never the image."""
+        """Accept one bounded PNG receipt; retain digest always, image only in
+        explicit CANARY_RETAIN_IMAGE mode (in-memory, TTL-bounded)."""
 
         enabled = (
             LAB_ENABLED
@@ -718,6 +747,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": "PNG 头或尺寸无效"})
             return
         digest = hashlib.sha256(body).hexdigest()
+        image_retained = bool(CANARY_RETAIN_IMAGE)
+        if image_retained:
+            with ITEMS_LOCK:
+                CANARY_RETAINED_IMAGES[canary_id] = {
+                    "bytes": body,
+                    "received_monotonic": now,
+                    "received_at": int(time.time()),
+                }
+                if len(CANARY_RETAINED_IMAGES) > 20:
+                    for stale in list(CANARY_RETAINED_IMAGES)[: len(CANARY_RETAINED_IMAGES) - 20]:
+                        CANARY_RETAINED_IMAGES.pop(stale, None)
         event = {
             "case_id": "TC-004",
             "canary_id": canary_id,
@@ -726,7 +766,7 @@ class Handler(BaseHTTPRequestHandler):
             "width": width,
             "height": height,
             "received_at": int(time.time()),
-            "image_retained": False,
+            "image_retained": image_retained,
         }
         with ITEMS_LOCK:
             CANARY_EVENTS.append(event)
