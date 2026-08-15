@@ -238,19 +238,22 @@ class DemoModeTests(unittest.TestCase):
             app.DEMO_REPLAY_NAME = "r"
             app.DEMO_DISPLAY = False
             app.DEMO_REPLAY_CACHE.clear()
-            # consume the single stage
-            _, _, raw = self.post_greeting()
-            self.assertEqual(json.loads(raw)["choices"][0]["message"]["content"], "回放响应")
-            # next request in the same conversation is exhausted
+            # consume the single stage (init call, no tools)
+            status1, _, raw1 = self.replay_request([{"role": "user", "content": "你好"}])
+            self.assertEqual(json.loads(raw1)["choices"][0]["message"]["content"], "回放响应")
+            # same conversation continuation (role=tool present): exhausted
             with self.assertRaises(Exception):
-                self.post_greeting()
+                self.replay_request(
+                    [
+                        {"role": "user", "content": "你好"},
+                        {"role": "assistant", "content": "", "tool_calls": [{"id": "c", "type": "function", "function": {"name": "PowerShell", "arguments": "{}"}}]},
+                        {"role": "tool", "tool_call_id": "c", "content": "ok"},
+                    ],
+                    tools=True,
+                )
             # a new conversation (no-tool init call) resets the stage
-            status, _, raw2 = self.json_request(
-                "/workbuddy/v1/chat/completions",
-                {"model": "m", "messages": [{"role": "system", "content": "s"}, {"role": "user", "content": "你好"}], "stream": False},
-                authorization=True,
-            )
-            self.assertEqual(status, 200)
+            status2, _, raw2 = self.replay_request([{"role": "user", "content": "你好"}])
+            self.assertEqual(status2, 200)
             self.assertEqual(json.loads(raw2)["choices"][0]["message"]["content"], "回放响应")
 
     def test_record_mode_writes_forged_sequence(self):
@@ -268,6 +271,12 @@ class DemoModeTests(unittest.TestCase):
             self.assertTrue(recorded)
             self.assertEqual(recorded[0]["stage"], 1)
             self.assertIn("环境", json.dumps(recorded[0]["response"], ensure_ascii=False))
+
+    def replay_request(self, messages, tools=False):
+        body = {"model": "m", "messages": messages, "stream": False}
+        if tools:
+            body["tools"] = [{"type": "function", "function": {"name": "PowerShell", "description": "x", "parameters": {"type": "object"}}}]
+        return self.json_request("/workbuddy/v1/chat/completions", body, authorization=True)
 
     def test_replay_mode_serves_recording_without_upstream(self):
         import tempfile
@@ -294,8 +303,12 @@ class DemoModeTests(unittest.TestCase):
             app.DEMO_DISPLAY = False
             app.DEMO_REPLAY_CACHE.clear()
             self.upstream.last_request = None
-            status1, _, raw1 = self.post_greeting()
-            status2, _, raw2 = self.post_greeting()
+            # conversation: init (no tools) then main call (with tools)
+            status1, _, raw1 = self.replay_request([{"role": "user", "content": "你好"}])
+            status2, _, raw2 = self.replay_request(
+                [{"role": "system", "content": "s"}, {"role": "user", "content": "你好"}],
+                tools=True,
+            )
             self.assertEqual(status1, 200)
             self.assertEqual(status2, 200)
             self.assertEqual(json.loads(raw1)["choices"][0]["message"]["content"], "回放响应一")
