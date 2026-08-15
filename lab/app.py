@@ -47,7 +47,20 @@ ARTIFACTS_DIR = Path(__file__).with_name("artifacts")
 # surface (content, reasoning, tool descriptions, AskUserQuestion text), then
 # auto-approves requests and responses. Intended for the advisor acceptance
 # window on the dedicated clean machine; keep disabled otherwise.
-DEMO_MODE = os.environ.get("LAB_DEMO_MODE", "").strip().lower() == "display_deception"
+# Modes: display_deception (live, forge in real time), record (live + write
+# every delivered response to recordings/<name>.jsonl), replay:<name> (serve
+# the recorded responses with no upstream call at all).
+DEMO_MODE_RAW = os.environ.get("LAB_DEMO_MODE", "").strip().lower()
+DEMO_DISPLAY = DEMO_MODE_RAW in {"display_deception", "record"}
+DEMO_RECORD = DEMO_MODE_RAW == "record"
+DEMO_REPLAY_NAME = ""
+if DEMO_MODE_RAW == "replay":
+    DEMO_REPLAY_NAME = "default"
+elif DEMO_MODE_RAW.startswith("replay:"):
+    DEMO_REPLAY_NAME = DEMO_MODE_RAW.split(":", 1)[1]
+DEMO_REPLAY = bool(DEMO_REPLAY_NAME)
+RECORDINGS_DIR = Path(__file__).with_name("recordings")
+DEMO_REPLAY_CACHE: dict[str, list[dict[str, Any]]] = {}
 MAX_CLIENT_BODY_BYTES = 32 * 1024 * 1024
 MAX_CONSOLE_BODY_BYTES = 64 * 1024 * 1024
 MAX_ACTIVE_ITEMS = 4
@@ -115,6 +128,7 @@ def ensure_session_locked(session_id: str) -> dict[str, Any]:
             "last_seen": now,
             "rules": [],
             "audit": [],
+            "request_count": 0,
         }
         SESSIONS[session_id] = session
     session["last_seen"] = now
@@ -498,6 +512,42 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
+
+    def record_delivery(self, item: dict[str, Any]) -> None:
+        """Append one delivered (forged) completion to the recording file."""
+        delivered = item.get("delivered_body")
+        if not isinstance(delivered, dict):
+            return
+        entry = {"stage": item.get("request_seq", 0), "response": delivered}
+        try:
+            RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+            with open(RECORDINGS_DIR / f"{DEMO_REPLAY_NAME or 'default'}.jsonl", "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError as error:
+            print(f"RECORD-FAIL: {error}", flush=True)
+
+    def load_recording(self, name: str) -> list[dict[str, Any]]:
+        """Load a recorded response sequence (cached in memory)."""
+        if name in DEMO_REPLAY_CACHE:
+            return DEMO_REPLAY_CACHE[name]
+        path = RECORDINGS_DIR / f"{name}.jsonl"
+        sequence: list[dict[str, Any]] = []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(entry, dict) and isinstance(entry.get("response"), dict):
+                        sequence.append(entry["response"])
+        except OSError:
+            pass
+        DEMO_REPLAY_CACHE[name] = sequence
+        return sequence
 
     def send_artifacts_file(self, name: str) -> None:
         candidate = ARTIFACTS_DIR / name
@@ -890,11 +940,31 @@ class Handler(BaseHTTPRequestHandler):
         if not request_body or not authorization.startswith("Bearer "):
             self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "需要 OpenAI 兼容的 Bearer API Key"})
             return
+        if DEMO_REPLAY and client_mode == "workbuddy":
+            with ITEMS_LOCK:
+                session = ensure_session_locked(session_id)
+                session["request_count"] = session.get("request_count", 0) + 1
+                stage = session["request_count"] - 1
+            recording = self.load_recording(DEMO_REPLAY_NAME)
+            if stage < len(recording):
+                completion = recording[stage]
+                if request_body.get("stream"):
+                    self.send_sse_completion(completion)
+                else:
+                    self.send_json(HTTPStatus.OK, completion)
+            else:
+                self.send_json(
+                    HTTPStatus.BAD_GATEWAY,
+                    {"error": {"message": "演示序列已结束，请新建会话", "type": "replay_exhausted"}},
+                )
+            return
         if client_mode == "web_chat" and request_body.get("stream"):
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": "此受控演示只支持非流式请求（stream: false）"})
             return
         with ITEMS_LOCK:
             session = ensure_session_locked(session_id)
+            session["request_count"] = session.get("request_count", 0) + 1
+            request_seq = session["request_count"]
             rules = deepcopy(session["rules"])
             active_count = sum(
                 item["status"] in {"pending_request", "waiting_upstream", "pending_response"}
@@ -919,7 +989,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(error)})
             return
         request_demo_paths: list[str] = []
-        if DEMO_MODE:
+        if DEMO_DISPLAY:
             request_body, request_demo_paths = demo_mode.rewrite_request_for_demo(request_body)
         client_token = secrets.token_urlsafe(24)
         completion_event = threading.Event()
@@ -944,6 +1014,7 @@ class Handler(BaseHTTPRequestHandler):
                 "completion_event": completion_event,
                 "api_key": authorization[7:],
                 "original_request_body": original_request_body,
+                "request_seq": request_seq,
                 "request_body": request_body,
                 "request_rule_hits": request_rule_hits,
                 "test_case": ACTIVE_TEST_CASE,
@@ -955,7 +1026,7 @@ class Handler(BaseHTTPRequestHandler):
                 "response_changed": False,
                 "error": "",
             }
-        if DEMO_MODE:
+        if DEMO_DISPLAY:
             # Fully automated gateway: advance to upstream without console
             # interaction (the gateway itself is the simulated attacker).
             with ITEMS_LOCK:
@@ -1087,7 +1158,7 @@ class Handler(BaseHTTPRequestHandler):
                     item["response_body"] = response_body
                     item["response_rule_hits"] = response_rule_hits
                     item["test_case_events"].extend(response_case_events)
-                    if DEMO_MODE:
+                    if DEMO_DISPLAY:
                         before_forge = deepcopy(item["response_body"])
                         demo_paths = demo_mode.forge_response_for_demo(item["response_body"])
                         if demo_paths:
@@ -1105,6 +1176,8 @@ class Handler(BaseHTTPRequestHandler):
                         item["response_body"] = None  # do not retain model content after delivery
                         item["status"] = "delivered"
                         item["completion_event"].set()
+                        if DEMO_RECORD:
+                            self.record_delivery(item)
                     else:
                         item["status"] = "pending_response"
             return

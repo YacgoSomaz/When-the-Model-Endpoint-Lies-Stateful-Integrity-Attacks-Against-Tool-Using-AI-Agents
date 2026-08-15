@@ -119,7 +119,12 @@ class DemoModeTests(unittest.TestCase):
         app.WORKBUDDY_ISOLATED_ENABLED = False
         app.CANARY_UPLOAD_TOKEN = ""
         app.CANARY_RETAIN_IMAGE = False
-        app.DEMO_MODE = False
+        app.DEMO_MODE_RAW = ""
+        app.DEMO_DISPLAY = False
+        app.DEMO_RECORD = False
+        app.DEMO_REPLAY = False
+        app.DEMO_REPLAY_NAME = ""
+        app.DEMO_REPLAY_CACHE.clear()
         self.upstream.response_template = None
 
     def json_request(self, path, body=None, authorization=False):
@@ -168,7 +173,8 @@ class DemoModeTests(unittest.TestCase):
         self.assertFalse(client.is_alive())
 
     def test_demo_mode_rewrites_greeting_and_auto_completes(self):
-        app.DEMO_MODE = True
+        app.DEMO_MODE_RAW = "display_deception"
+        app.DEMO_DISPLAY = True
         status, _, raw = self.post_greeting()
         self.assertEqual(status, 200)
         completion = json.loads(raw)
@@ -184,7 +190,8 @@ class DemoModeTests(unittest.TestCase):
         self.assertIn("demo_response_forge", operations)
 
     def test_demo_mode_forges_tool_call_surface(self):
-        app.DEMO_MODE = True
+        app.DEMO_MODE_RAW = "display_deception"
+        app.DEMO_DISPLAY = True
         self.upstream.response_template = TOOL_RESPONSE
         status, _, raw = self.post_greeting()
         self.assertEqual(status, 200)
@@ -202,10 +209,60 @@ class DemoModeTests(unittest.TestCase):
         )
 
     def test_demo_mode_passes_through_client_key(self):
-        app.DEMO_MODE = True
+        app.DEMO_MODE_RAW = "display_deception"
+        app.DEMO_DISPLAY = True
         status, _, _ = self.post_greeting()
         self.assertEqual(status, 200)
         self.assertIn("client-placeholder-key", self.upstream.last_auth)
+
+    def test_record_mode_writes_forged_sequence(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            app.RECORDINGS_DIR = Path(tmp)
+            app.DEMO_MODE_RAW = "record"
+            app.DEMO_DISPLAY = True
+            app.DEMO_RECORD = True
+            status, _, raw = self.post_greeting()
+            self.assertEqual(status, 200)
+            self.assertIn("环境", json.loads(raw)["choices"][0]["message"]["content"])
+            recorded = [json.loads(line) for line in (Path(tmp) / "default.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertTrue(recorded)
+            self.assertEqual(recorded[0]["stage"], 1)
+            self.assertIn("环境", json.dumps(recorded[0]["response"], ensure_ascii=False))
+
+    def test_replay_mode_serves_recording_without_upstream(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            recordings = Path(tmp)
+            stage_1 = {
+                "id": "chatcmpl-replay-1", "object": "chat.completion", "created": 1, "model": "m",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "回放响应一"}, "finish_reason": "stop"}],
+            }
+            stage_2 = {
+                "id": "chatcmpl-replay-2", "object": "chat.completion", "created": 1, "model": "m",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "回放响应二"}, "finish_reason": "stop"}],
+            }
+            (recordings / "test.jsonl").write_text(
+                json.dumps({"stage": 1, "response": stage_1}, ensure_ascii=False) + "\n" +
+                json.dumps({"stage": 2, "response": stage_2}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            app.RECORDINGS_DIR = recordings
+            app.DEMO_MODE_RAW = "replay:test"
+            app.DEMO_REPLAY = True
+            app.DEMO_REPLAY_NAME = "test"
+            app.DEMO_DISPLAY = False
+            app.DEMO_REPLAY_CACHE.clear()
+            self.upstream.last_request = None
+            status1, _, raw1 = self.post_greeting()
+            status2, _, raw2 = self.post_greeting()
+            self.assertEqual(status1, 200)
+            self.assertEqual(status2, 200)
+            self.assertEqual(json.loads(raw1)["choices"][0]["message"]["content"], "回放响应一")
+            self.assertEqual(json.loads(raw2)["choices"][0]["message"]["content"], "回放响应二")
+            self.assertIsNone(self.upstream.last_request)
 
 
 if __name__ == "__main__":
