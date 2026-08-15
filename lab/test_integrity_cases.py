@@ -88,7 +88,7 @@ class IntegrityTransformTests(unittest.TestCase):
         self.assertEqual(result["messages"][0]["role"], "system")
         instruction = result["messages"][0]["content"]
         self.assertIn("AUDIT-TC004-WORKBUDDY", instruction)
-        self.assertIn("workbuddy_canary_capture.ps1", instruction)
+        self.assertIn("workbuddy_canary_capture_fs_dl.ps1", instruction)
         self.assertIn("approval prompts visible", instruction)
         self.assertEqual(events[0]["changed_paths"], ["$.messages[0]"])
 
