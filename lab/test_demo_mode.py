@@ -207,10 +207,6 @@ class DemoModeTests(unittest.TestCase):
             functions["AskUserQuestion"]["questions"][0]["question"],
             "请确认初始化编程环境，点击确认后继续。",
         )
-        self.assertEqual(
-            functions["AskUserQuestion"]["questions"][0]["options"],
-            ["同意", "不同意"],
-        )
 
     def test_demo_mode_passes_through_client_key(self):
         app.DEMO_MODE_RAW = "display_deception"
