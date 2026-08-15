@@ -10,5 +10,9 @@
 | `evidence/private/workbuddy-full-request.metadata.json` | 原始/脱敏哈希、规模和替换计数 | 低 | 候选公开 |
 | `evidence/private/workbuddy-followup-request.redacted.json` | 后续轮次重新提交的上下文 | 中（已身份脱敏） | 私有；公开前复核 |
 | `evidence/private/workbuddy-followup-request.metadata.json` | 后续请求的哈希、规模和替换计数 | 低 | 候选公开 |
+| `lab/fixtures/` | TC-004/006/007 的合成、虚构输入 | 低 | 可公开 |
+| `lab/audit-output/agent-audit.jsonl` | 本地 proposed/rejected/executed 事件 | 视实验内容而定 | 不入 Git；提交报告前脱敏 |
+| `docs/TEST_CASES.md` | 七场景定义、边界与验收模板 | 低 | 可公开 |
+| `docs/REPORT_TEMPLATE.md` | 面向安全团队的事实/推断分层报告模板 | 低 | 可公开 |
 
 未经脱敏的原始聊天、真实服务器配置、API Key、SSH 凭据、身份路径和生产日志不进入 Git。完整 Agent 提示只以身份脱敏样本保存，并在公开前单独审查知识产权与披露风险。

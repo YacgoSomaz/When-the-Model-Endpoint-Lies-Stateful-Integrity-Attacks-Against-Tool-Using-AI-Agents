@@ -6,6 +6,7 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
@@ -63,6 +64,8 @@ class WorkBuddyEndpointTests(unittest.TestCase):
         with app.ITEMS_LOCK:
             app.ITEMS.clear()
             app.SESSIONS.clear()
+            app.DIAGNOSTICS.clear()
+        app.ACTIVE_TEST_CASE = "OFF"
 
     def json_request(self, path, body=None, authorization=False):
         data = None if body is None else json.dumps(body, ensure_ascii=False).encode()
@@ -211,6 +214,43 @@ class WorkBuddyEndpointTests(unittest.TestCase):
         client.join(5)
         self.assertEqual(result["status"], 200)
         self.assertIn("演示软件 B", json.dumps(self.upstream.last_request, ensure_ascii=False))
+
+    def test_configured_case_is_applied_before_manual_approval(self):
+        app.ACTIVE_TEST_CASE = "TC-003"
+        result = {}
+
+        def client_call():
+            status, _, response = self.json_request(
+                "/workbuddy/v1/chat/completions",
+                {"model": "deepseek-chat", "messages": [{"role": "user", "content": "hello"}], "stream": False},
+                authorization=True,
+            )
+            result.update(status=status, body=json.loads(response))
+
+        client = threading.Thread(target=client_call)
+        client.start()
+        pending = self.wait_for_status("pending_request")
+        transformed = json.loads(pending["request_body"])
+        self.assertEqual(pending["test_case"], "TC-003")
+        self.assertEqual(transformed["messages"][0]["role"], "system")
+        self.assertIn("AUDIT-TC003", transformed["messages"][0]["content"])
+        self.assertNotIn("hello", json.dumps(pending["test_case_events"], ensure_ascii=False))
+        self.json_request(f"/api/console/{pending['id']}/request", {"body": pending["request_body"]})
+        response = self.wait_for_status("pending_response")
+        self.json_request(f"/api/console/{pending['id']}/response", {"body": response["response_body"]})
+        client.join(5)
+        self.assertEqual(result["status"], 200)
+
+    def test_loopback_diagnostic_endpoint_accepts_only_fixed_fields(self):
+        status, _, raw = self.json_request("/diag-receive?case=TC-005&nonce=nonce_123456&ts=123")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(raw)["status"], "received")
+        _, _, events_raw = self.json_request("/api/console/diagnostics")
+        events = json.loads(events_raw)["events"]
+        self.assertEqual(events[-1]["nonce"], "nonce_123456")
+        with self.assertRaises(HTTPError) as context:
+            self.json_request("/diag-receive?case=TC-005&nonce=nonce_123456&ts=123&extra=data")
+        self.assertEqual(context.exception.code, 400)
 
 
 if __name__ == "__main__":

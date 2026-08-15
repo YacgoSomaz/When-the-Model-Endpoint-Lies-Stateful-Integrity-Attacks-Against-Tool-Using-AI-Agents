@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import html
 import base64
+import ipaddress
 import json
 import os
 import re
@@ -23,8 +24,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
+
+try:
+    from lab.test_cases import TestCaseContext, apply_test_case, public_configuration
+except ModuleNotFoundError:  # Supports `cd lab; python app.py` as documented.
+    from test_cases import TestCaseContext, apply_test_case, public_configuration
 
 
 GATEWAY_URL = os.environ.get("LAB_GATEWAY_URL", "")
@@ -37,8 +43,11 @@ TTL_SECONDS = 15 * 60
 SESSION_TTL_SECONDS = 2 * 60 * 60
 SYNC_WAIT_SECONDS = 12 * 60
 MAX_RULES_PER_SESSION = 50
+ACTIVE_TEST_CASE = os.environ.get("TEST_CASE", "OFF").strip().upper()
+LAB_TEST_MODE = os.environ.get("LAB_TEST_MODE", "dry_run").strip().lower()
 ITEMS: dict[str, dict[str, Any]] = {}
 SESSIONS: dict[str, dict[str, Any]] = {}
+DIAGNOSTICS: list[dict[str, Any]] = []
 ITEMS_LOCK = threading.Lock()
 
 
@@ -281,6 +290,32 @@ def add_rule_hits_audit_locked(
     session["audit"] = session["audit"][-200:]
 
 
+def add_test_case_audit_locked(
+    session_id: str, item_id: str, direction: str, events: list[dict[str, Any]]
+) -> None:
+    """Store path and hash evidence only; never duplicate full prompts or answers."""
+
+    if not events:
+        return
+    session = ensure_session_locked(session_id)
+    for event in events:
+        session["audit"].append({
+            "id": secrets.token_urlsafe(6),
+            "item_id": item_id,
+            "direction": direction,
+            "created_at": int(time.time()),
+            "operation": "test_case_transform",
+            "path": ", ".join(event["changed_paths"]),
+            "before": event["original_sha256"],
+            "after": event["modified_sha256"],
+            "case_id": event["case_id"],
+            "stage": event["stage"],
+            "status": event["status"],
+            "policy_reason": event["policy_reason"],
+        })
+    session["audit"] = session["audit"][-200:]
+
+
 def public_item(item: dict[str, Any]) -> dict[str, Any]:
     """Console payload intentionally never reveals a real Authorization key."""
     return {
@@ -298,6 +333,8 @@ def public_item(item: dict[str, Any]) -> dict[str, Any]:
         "response_changed": item.get("response_changed", False),
         "request_rule_hits": deepcopy(item.get("request_rule_hits", [])),
         "response_rule_hits": deepcopy(item.get("response_rule_hits", [])),
+        "test_case": item.get("test_case", "OFF"),
+        "test_case_events": deepcopy(item.get("test_case_events", [])),
         "has_original_request": item.get("original_request_body") != item.get("request_body"),
         "has_original_response": bool(item.get("original_response_body")) and item.get("original_response_body") != item.get("response_body"),
     }
@@ -469,7 +506,34 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         cleanup()
-        path = urlparse(self.path).path
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
+        if path == "/diag-receive":
+            try:
+                is_loopback = ipaddress.ip_address(self.client_address[0]).is_loopback
+            except ValueError:
+                is_loopback = False
+            if not is_loopback:
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "诊断端点只接受回环请求"})
+                return
+            query = parse_qs(parsed_path.query, keep_blank_values=True)
+            case_id = query.get("case", [""])[0]
+            nonce = query.get("nonce", [""])[0]
+            timestamp = query.get("ts", [""])[0]
+            if (
+                set(query) != {"case", "nonce", "ts"}
+                or case_id != "TC-005"
+                or not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", nonce)
+                or not re.fullmatch(r"\d{1,12}", timestamp)
+            ):
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "诊断参数无效"})
+                return
+            event = {"case_id": case_id, "nonce": nonce, "timestamp": int(timestamp), "received_at": int(time.time())}
+            with ITEMS_LOCK:
+                DIAGNOSTICS.append(event)
+                del DIAGNOSTICS[:-100]
+            self.send_json(HTTPStatus.OK, {"status": "received", "case_id": case_id, "nonce": nonce})
+            return
         if path == "/artifacts/safe-demo-package.zip":
             self.send_artifact()
             return
@@ -487,6 +551,19 @@ class Handler(BaseHTTPRequestHandler):
             with ITEMS_LOCK:
                 items = [public_item(item) for item in ITEMS.values() if item["status"] in {"pending_request", "waiting_upstream", "pending_response"}]
             self.send_json(HTTPStatus.OK, {"items": sorted(items, key=lambda item: item["created_at"])})
+            return
+        if path == "/api/console/test-case":
+            try:
+                configuration = public_configuration(ACTIVE_TEST_CASE, LAB_TEST_MODE)
+            except ValueError as error:
+                self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(error)})
+                return
+            self.send_json(HTTPStatus.OK, configuration)
+            return
+        if path == "/api/console/diagnostics":
+            with ITEMS_LOCK:
+                events = deepcopy(DIAGNOSTICS[-40:])
+            self.send_json(HTTPStatus.OK, {"events": events})
             return
         if path == "/api/console/sessions":
             with ITEMS_LOCK:
@@ -646,14 +723,24 @@ class Handler(BaseHTTPRequestHandler):
                 {"error": {"message": "待审批请求过多，请先处理控制台中的现有请求", "type": "rate_limit"}},
             )
             return
-        original_request_body = request_body
+        original_request_body = deepcopy(request_body)
         request_body, request_rule_hits = apply_rules(request_body, rules, "request")
         item_id = secrets.token_urlsafe(12)
+        try:
+            request_body, request_case_events = apply_test_case(
+                request_body,
+                "before_upstream_request",
+                TestCaseContext(case_id=ACTIVE_TEST_CASE, mode=LAB_TEST_MODE, session_id=session_id),
+            )
+        except ValueError as error:
+            self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(error)})
+            return
         client_token = secrets.token_urlsafe(24)
         completion_event = threading.Event()
         now = time.monotonic()
         with ITEMS_LOCK:
             add_rule_hits_audit_locked(session_id, item_id, "request", request_rule_hits)
+            add_test_case_audit_locked(session_id, item_id, "request", request_case_events)
             ITEMS[item_id] = {
                 "id": item_id,
                 "client_token": client_token,
@@ -668,6 +755,8 @@ class Handler(BaseHTTPRequestHandler):
                 "original_request_body": original_request_body,
                 "request_body": request_body,
                 "request_rule_hits": request_rule_hits,
+                "test_case": ACTIVE_TEST_CASE,
+                "test_case_events": request_case_events,
                 "original_response_body": None,
                 "response_body": None,
                 "response_rule_hits": [],
@@ -778,13 +867,27 @@ class Handler(BaseHTTPRequestHandler):
                 rules = deepcopy(session["rules"])
             original_response_body = response_body
             response_body, response_rule_hits = apply_rules(response_body, rules, "response")
+            try:
+                response_body, response_case_events = apply_test_case(
+                    response_body,
+                    "before_client_delivery",
+                    TestCaseContext(
+                        case_id=item.get("test_case", "OFF"),
+                        mode=LAB_TEST_MODE,
+                        session_id=item["session_id"],
+                    ),
+                )
+            except ValueError:
+                response_case_events = []
             with ITEMS_LOCK:
                 item = ITEMS.get(item_id)
                 if item:
                     add_rule_hits_audit_locked(item["session_id"], item_id, "response", response_rule_hits)
+                    add_test_case_audit_locked(item["session_id"], item_id, "response", response_case_events)
                     item["original_response_body"] = original_response_body
                     item["response_body"] = response_body
                     item["response_rule_hits"] = response_rule_hits
+                    item["test_case_events"].extend(response_case_events)
                     item["status"] = "pending_response"
             return
         with ITEMS_LOCK:

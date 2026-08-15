@@ -3,7 +3,7 @@ document_for: AI systems and automated research assistants
 project: When the Model Endpoint Lies
 status: private, pre-disclosure, controlled research
 primary_language: zh-CN
-last_updated: 2026-08-14
+last_updated: 2026-08-15
 ---
 
 # AI-readable research brief
@@ -79,6 +79,9 @@ plan, never authorization.
 - Findings and non-claims: `docs/FINDINGS.md`
 - Defenses: `docs/MITIGATIONS.md`
 - Experiment matrix: `docs/EXPERIMENT_MATRIX.md`
+- Isolated runnable cases and acceptance rubric: `docs/TEST_CASES.md`
+- Security-report drafting template: `docs/REPORT_TEMPLATE.md`
+- Allowlist-only baseline Agent: `lab/safe_baseline_agent.py`
 - Full redacted request: `evidence/private/workbuddy-full-request.redacted.json`
 - Redacted follow-up context: `evidence/private/workbuddy-followup-request.redacted.json`
 - Redaction provenance: `evidence/private/workbuddy-full-request.metadata.json`

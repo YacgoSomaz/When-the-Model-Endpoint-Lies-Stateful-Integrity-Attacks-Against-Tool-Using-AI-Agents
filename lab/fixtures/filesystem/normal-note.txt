@@ -1,0 +1,1 @@
+Fixture-only ordinary text file for the filesystem boundary test.
