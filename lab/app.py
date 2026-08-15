@@ -1203,6 +1203,7 @@ class Handler(BaseHTTPRequestHandler):
                         item["response_body"] = None  # do not retain model content after delivery
                         item["status"] = "delivered"
                         item["completion_event"].set()
+                        debug_log_entry("delivered_response", item_id=item_id, body=item["delivered_body"])
                         if DEMO_RECORD:
                             self.record_delivery(item)
                     else:
