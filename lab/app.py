@@ -513,7 +513,13 @@ class Handler(BaseHTTPRequestHandler):
                 is_loopback = ipaddress.ip_address(self.client_address[0]).is_loopback
             except ValueError:
                 is_loopback = False
-            if not is_loopback:
+            host_name = urlparse("//" + self.headers.get("Host", "")).hostname
+            came_through_proxy = bool(
+                self.headers.get("Forwarded")
+                or self.headers.get("X-Forwarded-For")
+                or self.headers.get("X-Real-IP")
+            )
+            if not is_loopback or host_name != "127.0.0.1" or came_through_proxy:
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "诊断端点只接受回环请求"})
                 return
             query = parse_qs(parsed_path.query, keep_blank_values=True)

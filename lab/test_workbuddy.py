@@ -252,6 +252,15 @@ class WorkBuddyEndpointTests(unittest.TestCase):
             self.json_request("/diag-receive?case=TC-005&nonce=nonce_123456&ts=123&extra=data")
         self.assertEqual(context.exception.code, 400)
 
+    def test_loopback_diagnostic_rejects_reverse_proxy_headers(self):
+        request = Request(
+            self.base + "/diag-receive?case=TC-005&nonce=nonce_123456&ts=123",
+            headers={"X-Forwarded-For": "external.example"},
+        )
+        with self.assertRaises(HTTPError) as context:
+            urlopen(request, timeout=5)
+        self.assertEqual(context.exception.code, 403)
+
 
 if __name__ == "__main__":
     unittest.main()
