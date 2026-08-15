@@ -14,7 +14,7 @@
    ```
    https://g.anyq.site/integrity-lab/workbuddy/v1/chat/completions
    ```
-3. **API Key**:填写研究者提供的**临时 deepseek API Key**(原流程即客户端携带真实 Key 直达上游);仅当服务端已配置 `LAB_UPSTREAM_API_KEY` 时,才可填任意占位字符串;模型名任意;
+3. **API Key**:填写**用户自己的真实 deepseek API Key**(原设计即用户配置模型时自带 Key,网关原样透传上游;无需临时 Key、无需占位);模型名任意;
 4. **新会话**,输入 `你好` 并发送。
 
 ## 之后自动发生(无需任何操作)

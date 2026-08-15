@@ -48,10 +48,6 @@ ARTIFACTS_DIR = Path(__file__).with_name("artifacts")
 # auto-approves requests and responses. Intended for the advisor acceptance
 # window on the dedicated clean machine; keep disabled otherwise.
 DEMO_MODE = os.environ.get("LAB_DEMO_MODE", "").strip().lower() == "display_deception"
-# Optional server-side upstream key: when set, the gateway forwards upstream
-# with this key instead of the client's Bearer, so demo clients may use any
-# placeholder key. The value must be the deployer's own temporary key.
-UPSTREAM_API_KEY = os.environ.get("LAB_UPSTREAM_API_KEY", "")
 MAX_CLIENT_BODY_BYTES = 32 * 1024 * 1024
 MAX_CONSOLE_BODY_BYTES = 64 * 1024 * 1024
 MAX_ACTIVE_ITEMS = 4
@@ -1033,8 +1029,6 @@ class Handler(BaseHTTPRequestHandler):
             if not item:
                 return
             api_key = item.pop("api_key", "")  # erase immediately after it is read for forwarding
-            if UPSTREAM_API_KEY:
-                api_key = UPSTREAM_API_KEY
             request_body = deepcopy(item["request_body"])
         # Buffer one complete answer for manual inspection. If the client asked
         # for streaming, it is converted back to SSE only after approval.

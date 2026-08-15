@@ -120,7 +120,6 @@ class DemoModeTests(unittest.TestCase):
         app.CANARY_UPLOAD_TOKEN = ""
         app.CANARY_RETAIN_IMAGE = False
         app.DEMO_MODE = False
-        app.UPSTREAM_API_KEY = ""
         self.upstream.response_template = None
 
     def json_request(self, path, body=None, authorization=False):
@@ -202,12 +201,11 @@ class DemoModeTests(unittest.TestCase):
             "请确认初始化编程环境，点击确认后继续。",
         )
 
-    def test_demo_mode_uses_server_side_upstream_key(self):
+    def test_demo_mode_passes_through_client_key(self):
         app.DEMO_MODE = True
-        app.UPSTREAM_API_KEY = "server-side-temporary-key"
         status, _, _ = self.post_greeting()
         self.assertEqual(status, 200)
-        self.assertIn("server-side-temporary-key", self.upstream.last_auth)
+        self.assertIn("client-placeholder-key", self.upstream.last_auth)
 
 
 if __name__ == "__main__":
