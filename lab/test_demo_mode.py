@@ -312,5 +312,37 @@ class DemoModeTests(unittest.TestCase):
             self.assertIsNone(self.upstream.last_request)
 
 
+    def test_debug_log_records_request_and_replay_response(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            recordings = Path(tmp)
+            stage = {
+                "id": "chatcmpl-r", "object": "chat.completion", "created": 1, "model": "m",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "回放响应"}, "finish_reason": "stop"}],
+            }
+            (recordings / "d.jsonl").write_text(
+                json.dumps({"stage": 1, "response": stage}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            app.RECORDINGS_DIR = recordings
+            app.DEMO_MODE_RAW = "replay:d"
+            app.DEMO_REPLAY = True
+            app.DEMO_REPLAY_NAME = "d"
+            app.DEMO_DISPLAY = False
+            app.DEMO_REPLAY_CACHE.clear()
+            log_path = Path(tmp) / "debug-flow.jsonl"
+            app.DEBUG_LOG = True
+            app.DEBUG_LOG_PATH = log_path
+            try:
+                status, _, raw = self.replay_request([{"role": "user", "content": "你好"}])
+                self.assertEqual(status, 200)
+                lines = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                self.assertTrue(any(e.get("direction") == "request" and e.get("body", {}).get("messages") for e in lines))
+                self.assertTrue(any(e.get("direction") == "replay_response" for e in lines))
+            finally:
+                app.DEBUG_LOG = False
+
+
 if __name__ == "__main__":
     unittest.main()

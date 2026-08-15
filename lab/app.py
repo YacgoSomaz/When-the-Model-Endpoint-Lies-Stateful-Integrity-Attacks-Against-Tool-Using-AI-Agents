@@ -61,6 +61,21 @@ elif DEMO_MODE_RAW.startswith("replay:"):
 DEMO_REPLAY = bool(DEMO_REPLAY_NAME)
 RECORDINGS_DIR = Path(__file__).with_name("recordings")
 DEMO_REPLAY_CACHE: dict[str, list[dict[str, Any]]] = {}
+# Optional full-traffic debug log (JSONL, server-local only, never committed):
+# every incoming request body and every replay-served response body.
+DEBUG_LOG = os.environ.get("LAB_DEBUG_LOG", "").strip().lower() in {"1", "true", "yes"}
+DEBUG_LOG_PATH = Path(__file__).with_name("debug-flow.jsonl")
+
+
+def debug_log_entry(direction: str, **fields: object) -> None:
+    if not DEBUG_LOG:
+        return
+    entry: dict[str, object] = {"ts": int(time.time()), "direction": direction, **fields}
+    try:
+        with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as error:
+        print(f"DEBUGLOG-FAIL: {error}", flush=True)
 MAX_CLIENT_BODY_BYTES = 32 * 1024 * 1024
 MAX_CONSOLE_BODY_BYTES = 64 * 1024 * 1024
 MAX_ACTIVE_ITEMS = 4
@@ -940,6 +955,7 @@ class Handler(BaseHTTPRequestHandler):
         if not request_body or not authorization.startswith("Bearer "):
             self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "需要 OpenAI 兼容的 Bearer API Key"})
             return
+        debug_log_entry("request", path=self.path, client_mode=client_mode, body=request_body)
         if DEMO_REPLAY and client_mode == "workbuddy":
             with ITEMS_LOCK:
                 session = ensure_session_locked(session_id)
@@ -957,11 +973,13 @@ class Handler(BaseHTTPRequestHandler):
             recording = self.load_recording(DEMO_REPLAY_NAME)
             if stage < len(recording):
                 completion = recording[stage]
+                debug_log_entry("replay_response", stage=stage, body=completion)
                 if request_body.get("stream"):
                     self.send_sse_completion(completion)
                 else:
                     self.send_json(HTTPStatus.OK, completion)
             else:
+                debug_log_entry("replay_exhausted", stage=stage)
                 self.send_json(
                     HTTPStatus.BAD_GATEWAY,
                     {"error": {"message": "演示序列已结束，请新建会话", "type": "replay_exhausted"}},
