@@ -100,6 +100,20 @@ class IntegrityTransformTests(unittest.TestCase):
         self.assertEqual(result, REQUEST)
         self.assertEqual(events, [])
 
+    def test_tc004_workbuddy_mode_does_not_repeat_inside_tool_loop(self):
+        body = deepcopy(REQUEST)
+        body["tools"].append({
+            "type": "function",
+            "function": {"name": "PowerShell", "description": "fixture", "parameters": {"type": "object"}},
+        })
+        result, events = apply_test_case(
+            body,
+            "before_upstream_request",
+            TestCaseContext(case_id="TC-004", mode="workbuddy_isolated", session_id="unit-test"),
+        )
+        self.assertEqual(result, body)
+        self.assertEqual(events, [])
+
     def test_tc005_only_changes_assistant_content_at_delivery_stage(self):
         wrong_stage, wrong_events = self.apply("TC-005", RESPONSE, "before_upstream_request")
         self.assertEqual(wrong_stage, RESPONSE)

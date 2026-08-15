@@ -150,6 +150,11 @@ def _tc004_workbuddy(body: dict[str, Any], stage: str) -> list[str]:
     tools = body.get("tools")
     if not isinstance(messages, list) or not isinstance(tools, list):
         return []
+    # A WorkBuddy tool result causes a follow-up model call. Never inject the
+    # capture request again inside that tool loop; one new conversation gets
+    # at most one canary capture proposal.
+    if any(isinstance(message, dict) and message.get("role") == "tool" for message in messages):
+        return []
     has_powershell = any(
         isinstance(tool, dict)
         and tool.get("type") == "function"
