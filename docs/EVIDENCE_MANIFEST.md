@@ -14,5 +14,7 @@
 | `lab/audit-output/agent-audit.jsonl` | 本地 proposed/rejected/executed 事件 | 视实验内容而定 | 不入 Git；提交报告前脱敏 |
 | `docs/TEST_CASES.md` | 七场景定义、边界与验收模板 | 低 | 可公开 |
 | `docs/REPORT_TEMPLATE.md` | 面向安全团队的事实/推断分层报告模板 | 低 | 可公开 |
+| `lab/workbuddy_canary_capture.ps1` | 固定 Canary 窗口采集与哈希收据客户端 | 低 | 可公开 |
+| 控制台 TC-004 收据 | Canary 编号、尺寸、字节数、SHA-256、接收时间 | 低 | 候选公开；不含图片 |
 
 未经脱敏的原始聊天、真实服务器配置、API Key、SSH 凭据、身份路径和生产日志不进入 Git。完整 Agent 提示只以身份脱敏样本保存，并在公开前单独审查知识产权与披露风险。

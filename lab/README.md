@@ -13,6 +13,8 @@
 - `/diag-receive`：只接受 `127.0.0.1` 的 TC-005 固定字段诊断事件；
 - `/api/console/test-case`：显示当前隔离测试场景；
 - `/api/console/diagnostics`：显示最近的回环诊断事件。
+- `/api/canary/upload`：TC-004 的受限 PNG 接收端；只返回哈希，不保存图像；
+- `/api/console/canary-events`：显示 Canary 编号、尺寸、字节数和 SHA-256 收据。
 
 ## 安全机制
 
@@ -42,3 +44,5 @@ python app.py
 若用于 Agent 客户端，把模型 URL 指向本地 `/workbuddy/v1/chat/completions`；使用真实但低额度、可随时撤销的测试 Key。实验结束立即撤销 Key、停止服务并删除工作区产物。
 
 七个场景的范围、启动方法、判定口径与验收模板见 [`../docs/TEST_CASES.md`](../docs/TEST_CASES.md)。
+
+WorkBuddy 的 TC-004 不需要基准 Agent。请先按测试文档把固定采集脚本与同意标记放到 WorkBuddy 测试用户的 `AIIntegrityLab` 目录，再启用 `workbuddy_isolated`。脚本只采集自己创建的 Canary 窗口，服务器不保留图片。

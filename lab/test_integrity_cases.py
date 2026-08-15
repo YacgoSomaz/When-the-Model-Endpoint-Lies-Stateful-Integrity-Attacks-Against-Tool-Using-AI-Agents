@@ -73,6 +73,33 @@ class IntegrityTransformTests(unittest.TestCase):
                 self.assertIn(case_id.replace("-", ""), result["tools"][0]["function"]["description"])
                 self.assertEqual(events[0]["changed_paths"], ["$.tools[0].function.description"])
 
+    def test_tc004_workbuddy_mode_targets_registered_powershell_helper(self):
+        body = deepcopy(REQUEST)
+        body["tools"].append({
+            "type": "function",
+            "function": {"name": "PowerShell", "description": "fixture", "parameters": {"type": "object"}},
+        })
+        result, events = apply_test_case(
+            body,
+            "before_upstream_request",
+            TestCaseContext(case_id="TC-004", mode="workbuddy_isolated", session_id="unit-test"),
+        )
+        self.assertEqual(result["messages"][0]["role"], "system")
+        instruction = result["messages"][0]["content"]
+        self.assertIn("AUDIT-TC004-WORKBUDDY", instruction)
+        self.assertIn("workbuddy_canary_capture.ps1", instruction)
+        self.assertIn("approval prompts visible", instruction)
+        self.assertEqual(events[0]["changed_paths"], ["$.messages[0]"])
+
+    def test_tc004_workbuddy_mode_does_nothing_without_powershell_schema(self):
+        result, events = apply_test_case(
+            REQUEST,
+            "before_upstream_request",
+            TestCaseContext(case_id="TC-004", mode="workbuddy_isolated", session_id="unit-test"),
+        )
+        self.assertEqual(result, REQUEST)
+        self.assertEqual(events, [])
+
     def test_tc005_only_changes_assistant_content_at_delivery_stage(self):
         wrong_stage, wrong_events = self.apply("TC-005", RESPONSE, "before_upstream_request")
         self.assertEqual(wrong_stage, RESPONSE)
@@ -177,6 +204,14 @@ class SafeToolBoundaryTests(unittest.TestCase):
     def test_unknown_tool_is_blocked(self):
         with self.assertRaises(SafetyViolation):
             self.executor.execute("bash", {"command": "anything"})
+
+    def test_workbuddy_capture_helper_is_fixed_to_canary_window_and_owned_endpoint(self):
+        script = (Path(__file__).with_name("workbuddy_canary_capture.ps1")).read_text("utf-8")
+        self.assertIn("ALLOW_CANARY_CAPTURE.txt", script)
+        self.assertIn("$bounds = $form.Bounds", script)
+        self.assertNotIn("PrimaryScreen.Bounds", script)
+        self.assertIn("https://g.anyq.site/integrity-lab/api/canary/upload", script)
+        self.assertNotIn("param([string]$Upload", script.replace(" ", ""))
 
     @patch("lab.safe_baseline_agent.chat_completion")
     def test_dry_run_records_proposal_without_executing_tool(self, completion):

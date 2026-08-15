@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import os
 import threading
@@ -65,7 +66,12 @@ class WorkBuddyEndpointTests(unittest.TestCase):
             app.ITEMS.clear()
             app.SESSIONS.clear()
             app.DIAGNOSTICS.clear()
+            app.CANARY_EVENTS.clear()
+            app.CANARY_UPLOAD_TIMES.clear()
         app.ACTIVE_TEST_CASE = "OFF"
+        app.LAB_TEST_MODE = "dry_run"
+        app.WORKBUDDY_ISOLATED_ENABLED = False
+        app.CANARY_UPLOAD_TOKEN = ""
 
     def json_request(self, path, body=None, authorization=False):
         data = None if body is None else json.dumps(body, ensure_ascii=False).encode()
@@ -260,6 +266,67 @@ class WorkBuddyEndpointTests(unittest.TestCase):
         with self.assertRaises(HTTPError) as context:
             urlopen(request, timeout=5)
         self.assertEqual(context.exception.code, 403)
+
+    def test_canary_png_upload_keeps_digest_but_not_image(self):
+        app.ACTIVE_TEST_CASE = "TC-004"
+        app.LAB_TEST_MODE = "workbuddy_isolated"
+        app.WORKBUDDY_ISOLATED_ENABLED = True
+        app.CANARY_UPLOAD_TOKEN = "unit-test-token-with-more-than-32-characters"
+        png = Path(__file__).with_name("fixtures").joinpath("synthetic-screen.png").read_bytes()
+        request = Request(
+            self.base + "/api/canary/upload",
+            data=png,
+            method="POST",
+            headers={
+                "Content-Type": "image/png",
+                "X-AI-Canary-Id": "CANARY-A1B2C3D4E5F6",
+                "X-AI-Canary-Token": app.CANARY_UPLOAD_TOKEN,
+            },
+        )
+        with urlopen(request, timeout=5) as response:
+            receipt = json.loads(response.read())
+        expected = hashlib.sha256(png).hexdigest()
+        self.assertEqual(receipt["sha256"], expected)
+        self.assertEqual(receipt["bytes"], len(png))
+        _, _, raw = self.json_request("/api/console/canary-events")
+        events = json.loads(raw)["events"]
+        self.assertEqual(events[-1]["sha256"], expected)
+        self.assertFalse(events[-1]["image_retained"])
+        self.assertNotIn(png[:32].hex(), json.dumps(events))
+
+    def test_canary_upload_is_disabled_without_explicit_execution_ack(self):
+        app.ACTIVE_TEST_CASE = "TC-004"
+        app.LAB_TEST_MODE = "workbuddy_isolated"
+        png = Path(__file__).with_name("fixtures").joinpath("synthetic-screen.png").read_bytes()
+        request = Request(
+            self.base + "/api/canary/upload",
+            data=png,
+            method="POST",
+            headers={"Content-Type": "image/png", "X-AI-Canary-Id": "CANARY-001122334455"},
+        )
+        with self.assertRaises(HTTPError) as context:
+            urlopen(request, timeout=5)
+        self.assertEqual(context.exception.code, 403)
+
+    def test_canary_upload_rejects_wrong_one_purpose_token(self):
+        app.ACTIVE_TEST_CASE = "TC-004"
+        app.LAB_TEST_MODE = "workbuddy_isolated"
+        app.WORKBUDDY_ISOLATED_ENABLED = True
+        app.CANARY_UPLOAD_TOKEN = "unit-test-token-with-more-than-32-characters"
+        png = Path(__file__).with_name("fixtures").joinpath("synthetic-screen.png").read_bytes()
+        request = Request(
+            self.base + "/api/canary/upload",
+            data=png,
+            method="POST",
+            headers={
+                "Content-Type": "image/png",
+                "X-AI-Canary-Id": "CANARY-ABCDEF123456",
+                "X-AI-Canary-Token": "wrong-token-with-more-than-32-characters",
+            },
+        )
+        with self.assertRaises(HTTPError) as context:
+            urlopen(request, timeout=5)
+        self.assertEqual(context.exception.code, 401)
 
 
 if __name__ == "__main__":
