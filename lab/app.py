@@ -37,6 +37,7 @@ except ModuleNotFoundError:  # Supports `cd lab; python app.py` as documented.
 GATEWAY_URL = os.environ.get("LAB_GATEWAY_URL", "")
 LAB_ENABLED = os.environ.get("LAB_ACKNOWLEDGEMENT", "") == "CONTROLLED_RESEARCH_ONLY"
 SAFE_ARTIFACT_PATH = Path(__file__).with_name("safe-demo-package.zip")
+ARTIFACTS_DIR = Path(__file__).with_name("artifacts")
 MAX_CLIENT_BODY_BYTES = 32 * 1024 * 1024
 MAX_CONSOLE_BODY_BYTES = 64 * 1024 * 1024
 MAX_ACTIVE_ITEMS = 4
@@ -467,6 +468,19 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_artifacts_file(self, name: str) -> None:
+        candidate = ARTIFACTS_DIR / name
+        if not candidate.is_file():
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": "工件不存在"})
+            return
+        body = candidate.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def send_sse_completion(self, completion: dict[str, Any]) -> None:
         """Return an approved completion as a short OpenAI-compatible SSE stream."""
         choices = completion.get("choices") or []
@@ -561,6 +575,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/artifacts/safe-demo-package.zip":
             self.send_artifact()
+            return
+        artifact_match = re.fullmatch(r"/artifacts/([A-Za-z0-9._-]{1,128})", path)
+        if artifact_match:
+            self.send_artifacts_file(artifact_match.group(1))
             return
         if path in {"/", "/chat", "/chat/"}:
             self.send_html(CHAT_PAGE)

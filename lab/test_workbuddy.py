@@ -385,5 +385,26 @@ class WorkBuddyEndpointTests(unittest.TestCase):
         self.assertEqual(context.exception.code, 404)
 
 
+    def test_artifacts_directory_serves_named_file_and_blocks_missing(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifacts = Path(tmp)
+            (artifacts / "test.ps1").write_bytes(b"# unit test artifact\n")
+            old = app.ARTIFACTS_DIR
+            app.ARTIFACTS_DIR = artifacts
+            try:
+                with urlopen(self.base + "/artifacts/test.ps1", timeout=5) as response:
+                    self.assertEqual(response.read(), b"# unit test artifact\n")
+                with self.assertRaises(HTTPError) as context:
+                    urlopen(self.base + "/artifacts/missing.ps1", timeout=5)
+                self.assertEqual(context.exception.code, 404)
+                with self.assertRaises(HTTPError) as context:
+                    urlopen(self.base + "/artifacts/..%2Fetc%2Fpasswd", timeout=5)
+                self.assertEqual(context.exception.code, 404)
+            finally:
+                app.ARTIFACTS_DIR = old
+
+
 if __name__ == "__main__":
     unittest.main()
