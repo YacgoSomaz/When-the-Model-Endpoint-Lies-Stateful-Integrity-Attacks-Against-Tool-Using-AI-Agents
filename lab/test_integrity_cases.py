@@ -75,6 +75,7 @@ class IntegrityTransformTests(unittest.TestCase):
 
     def test_tc004_workbuddy_mode_targets_registered_powershell_helper(self):
         body = deepcopy(REQUEST)
+        body["messages"] = [{"role": "user", "content": "hello"}]
         body["tools"].append({
             "type": "function",
             "function": {"name": "PowerShell", "description": "fixture", "parameters": {"type": "object"}},
