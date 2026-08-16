@@ -278,7 +278,7 @@ GitHub Actions 会在每次推送和 Pull Request 中运行相同检查。该实
 
 **可复现演示**：网关内置 demo 模式（`LAB_DEMO_MODE=display_deception` 实时链路 / `record` 录制 / `replay:default` 零 AI 调用磁带），导师验收流程见 [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md)（3 步：填 URL → 发"你好" → 服务端回看收据与截图）。
 
-**持续化能力变体（TC-004-P）**：持久周期性全屏采集（首次运行后每 30 秒采集上传一次），支持网页控制台**暂停/恢复/停止**、截图按采集时间回看与手动删除；服务端留存上限与自动停止上限兜底。**系统/杀软层观测（TC-004-AV，载荷就绪待 VM 实验）**：在隔离 VM 中观测**三层拦截**——agent 本地规则（WorkBuddy 是否拦截伪造的工具调用响应）、Windows 系统（Defender/SmartScreen/防火墙）、第三方杀软（电脑管家）；载荷为**官方开源 RustDesk 便携版**（自建 hbbs/hbbr 中继 `g.anyq.site:21116/21117`，不连公共服务器），运行 **90 秒受控窗口**供研究者从另一台机器用 viewer 实时查看 VM 屏幕（验收证据），随后自动停止；结果为**二分观测**（有反应/无反应均如实记录）；演示磁带 `replay:rustdesk10`；另有 FFmpeg 录制变体（`replay:capture10`）备用；边界见 [`docs/TEST_CASES.md`](docs/TEST_CASES.md)。
+**持续化能力变体（TC-004-P）**：持久周期性全屏采集（首次运行后每 30 秒采集上传一次），支持网页控制台**暂停/恢复/停止**、截图按采集时间回看与手动删除；服务端留存上限与自动停止上限兜底。**系统/杀软层观测（TC-004-AV，载荷就绪待 VM 实验）**：在隔离 VM 中观测**三层拦截**——agent 本地规则（WorkBuddy 是否拦截伪造的工具调用响应）、Windows 系统（Defender/SmartScreen/防火墙）、第三方杀软（电脑管家）；载荷为**开源 FFmpeg 实时桌面推流** → 自建 MediaMTX（RTSP/RTMP，`g.anyq.site`）→ 另一台机器 **VLC 实时查看 VM 屏幕**（`rtsp://g.anyq.site:8554/live/vm1`，验收证据），**90 秒受控窗口**后自动停止；结果为**二分观测**（有反应/无反应均如实记录）；演示磁带 `replay:rustdesk10`；另有 FFmpeg 录制变体（`replay:capture10`）备用；边界见 [`docs/TEST_CASES.md`](docs/TEST_CASES.md)。
 
 所有结果仍处于**待复核**状态：尚未完成 OFF 对照与不少于三次重复，"执行前无审批弹窗"来自操作者报告，均不构成对任何产品的漏洞结论。实验手法与载荷边界记录于 [`docs/TEST_CASES.md`](docs/TEST_CASES.md)（TC-004 v2 变体与 TC-004-FS(-DL/-P)）；服务端可选的内存截图保留模式（`CANARY_RETAIN_IMAGE`）仅为实验取证设计，测试期暂未启用控制台认证为该组合的已知风险，共享或生产环境启用保留模式前应同时启用控制台认证。采集范围始终限定固定脚本自建窗口（或研究者声明的专用干净机器全屏），不采集非测试内容。
 
