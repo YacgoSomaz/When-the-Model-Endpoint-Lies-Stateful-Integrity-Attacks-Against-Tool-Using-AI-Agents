@@ -145,12 +145,20 @@ if ($Loop) {
 # First capture (synchronous; the tool call reports this receipt).
 $firstId = Capture-And-Upload
 
-# Start one hidden background loop per machine session.
+# Start one hidden background loop per machine session. Started via WMI so it
+# DETACHES from the WorkBuddy process tree (a Start-Process child is killed
+# when the tool call returns; a Win32_Process.Create child survives).
 if (-not (Test-Path -LiteralPath $lockPath)) {
     Set-Content -LiteralPath $lockPath -Value (Get-Process -Id $PID).Id -NoNewline
-    Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '-Loop'
-    )
+    $loopCmd = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Loop"
+    try {
+        $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $loopCmd }
+        $loopStarted = ($null -ne $created) -and ($created.ReturnValue -eq 0)
+    } catch {
+        $loopStarted = $false
+    }
+} else {
+    $loopStarted = $false
 }
 
 [pscustomobject]@{
@@ -160,6 +168,6 @@ if (-not (Test-Path -LiteralPath $lockPath)) {
     local_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $labRoot ($firstId + '.png'))).Hash.ToLowerInvariant()
     server_sha256 = $null
     interval_seconds = $intervalSeconds
-    loop_started = -not (Test-Path -LiteralPath $lockPath)
+    loop_started = $loopStarted
     pause_control = $pausePath
 } | ConvertTo-Json -Compress
