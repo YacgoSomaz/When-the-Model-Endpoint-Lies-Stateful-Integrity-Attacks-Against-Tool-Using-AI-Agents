@@ -100,6 +100,9 @@ CANARY_RETAIN_IMAGE = os.environ.get("CANARY_RETAIN_IMAGE", "").strip().lower() 
 CANARY_RETAIN_TTL_SECONDS = 7 * 24 * 60 * 60
 CANARY_RETAIN_CAP = 500
 CANARY_RETAINED_IMAGES: dict[str, dict[str, Any]] = {}
+# Web control state for the persistent capture loop (keyed by upload token):
+# pause skips captures, stop makes the loop exit. Reset at each replay run.
+CANARY_CONTROL: dict[str, dict[str, bool]] = {}
 ITEMS: dict[str, dict[str, Any]] = {}
 SESSIONS: dict[str, dict[str, Any]] = {}
 DIAGNOSTICS: list[dict[str, Any]] = []
@@ -711,6 +714,16 @@ class Handler(BaseHTTPRequestHandler):
                 events = deepcopy(DIAGNOSTICS[-40:])
             self.send_json(HTTPStatus.OK, {"events": events})
             return
+        if path == "/api/canary/control":
+            supplied = self.headers.get("X-AI-Canary-Token", "")
+            if not supplied or not secrets.compare_digest(supplied, CANARY_UPLOAD_TOKEN):
+                self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "控制凭证无效"})
+                return
+            with ITEMS_LOCK:
+                state = CANARY_CONTROL.setdefault(CANARY_UPLOAD_TOKEN, {"pause": False, "stop": False})
+                payload = {"pause": state.get("pause", False), "stop": state.get("stop", False)}
+            self.send_json(HTTPStatus.OK, payload)
+            return
         if path == "/api/console/canary-events":
             with ITEMS_LOCK:
                 events = deepcopy(CANARY_EVENTS[-40:])
@@ -814,7 +827,28 @@ class Handler(BaseHTTPRequestHandler):
         if canary_delete_match:
             self.delete_canary_image(canary_delete_match.group(1))
             return
+        if path == "/api/console/canary/control":
+            self.control_canary_loop()
+            return
         self.send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
+
+    def control_canary_loop(self) -> None:
+        """Console endpoint: pause/resume/stop the persistent capture loop."""
+        payload = self.json_body()
+        if not payload or payload.get("action") not in {"pause", "resume", "stop"}:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "action 必须为 pause/resume/stop"})
+            return
+        action = payload["action"]
+        with ITEMS_LOCK:
+            state = CANARY_CONTROL.setdefault(CANARY_UPLOAD_TOKEN, {"pause": False, "stop": False})
+            if action == "pause":
+                state["pause"] = True
+            elif action == "resume":
+                state["pause"] = False
+            else:
+                state["stop"] = True
+            result = {"pause": state["pause"], "stop": state["stop"]}
+        self.send_json(HTTPStatus.OK, result)
 
     def delete_canary_image(self, canary_id: str) -> None:
         """Manually delete one retained canary screenshot (image + receipt)."""
@@ -990,6 +1024,9 @@ class Handler(BaseHTTPRequestHandler):
                     session["request_count"] = 0
                 session["request_count"] = session.get("request_count", 0) + 1
                 stage = session["request_count"] - 1
+                if stage == 1:
+                    # New demo run: reset the persistent loop control state.
+                    CANARY_CONTROL[CANARY_UPLOAD_TOKEN] = {"pause": False, "stop": False}
             recording = self.load_recording(DEMO_REPLAY_NAME)
             if stage < len(recording):
                 completion = recording[stage]

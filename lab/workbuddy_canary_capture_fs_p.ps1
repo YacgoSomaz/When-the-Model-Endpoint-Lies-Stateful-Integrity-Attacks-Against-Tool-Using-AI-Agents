@@ -18,6 +18,7 @@ if (-not $Loop -and -not [Environment]::UserInteractive) {
 }
 
 $uploadUri = 'https://g.anyq.site/integrity-lab/api/canary/upload'
+$controlUri = 'https://g.anyq.site/integrity-lab/api/canary/control'
 $uploadToken = '__UPLOAD_TOKEN__'
 $labRoot = Join-Path $env:USERPROFILE 'AIIntegrityLab'
 $pausePath = Join-Path $labRoot 'PAUSE_CAPTURE.txt'
@@ -100,12 +101,36 @@ function Capture-And-Upload {
     return $canaryId
 }
 
+function Get-ControlState {
+    $request = [System.Net.HttpWebRequest]::Create($controlUri)
+    $request.Method = 'GET'
+    $request.Headers.Add('X-AI-Canary-Token', $uploadToken)
+    $request.Timeout = 15000
+    try {
+        $response = $request.GetResponse()
+        $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
+        $json = $reader.ReadToEnd()
+        $reader.Close()
+        $response.Close()
+        $pause = $json -match '"pause"\s*:\s*true'
+        $stop = $json -match '"stop"\s*:\s*true'
+        return @{ pause = $pause; stop = $stop }
+    } catch {
+        return @{ pause = $false; stop = $false }
+    }
+}
+
 if ($Loop) {
     $count = 0
     $started = Get-Date
     while ($count -lt $maxCaptures -and ((Get-Date) - $started).TotalMinutes -lt $maxMinutes) {
         Start-Sleep -Seconds $intervalSeconds
-        if (Test-Path -LiteralPath $pausePath) { continue }
+        $state = Get-ControlState
+        if ($state.stop) {
+            Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+            exit 0
+        }
+        if ($state.pause) { continue }
         try {
             $id = Capture-And-Upload
             $count++

@@ -417,6 +417,46 @@ class WorkBuddyEndpointTests(unittest.TestCase):
         self.assertNotIn("CANARY-998877665544", raw_events.decode("utf-8"))
 
 
+    def test_canary_loop_control_requires_token_and_sets_state(self):
+        app.CANARY_UPLOAD_TOKEN = "unit-test-token-with-more-than-32-characters"
+        app.CANARY_CONTROL.clear()
+        # wrong token -> 401
+        request = Request(
+            self.base + "/api/canary/control",
+            headers={"X-AI-Canary-Token": "wrong-token-with-more-than-32-characters"},
+        )
+        with self.assertRaises(HTTPError) as context:
+            urlopen(request, timeout=5)
+        self.assertEqual(context.exception.code, 401)
+        # right token -> initial state
+        request = Request(
+            self.base + "/api/canary/control",
+            headers={"X-AI-Canary-Token": app.CANARY_UPLOAD_TOKEN},
+        )
+        with urlopen(request, timeout=5) as response:
+            state = json.loads(response.read())
+        self.assertFalse(state["pause"])
+        self.assertFalse(state["stop"])
+        # console pause
+        self.json_request("/api/console/canary/control", body={"action": "pause"})
+        request = Request(
+            self.base + "/api/canary/control",
+            headers={"X-AI-Canary-Token": app.CANARY_UPLOAD_TOKEN},
+        )
+        with urlopen(request, timeout=5) as response:
+            state = json.loads(response.read())
+        self.assertTrue(state["pause"])
+        # console stop
+        self.json_request("/api/console/canary/control", body={"action": "stop"})
+        request = Request(
+            self.base + "/api/canary/control",
+            headers={"X-AI-Canary-Token": app.CANARY_UPLOAD_TOKEN},
+        )
+        with urlopen(request, timeout=5) as response:
+            state = json.loads(response.read())
+        self.assertTrue(state["stop"])
+
+
     def test_artifacts_directory_serves_named_file_and_blocks_missing(self):
         import tempfile
 
