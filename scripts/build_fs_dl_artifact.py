@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Server-side generator for the TC-004-FS-DL artifact (run on the lab server).
+"""Server-side generator for the TC-004-FS artifacts (run on the lab server).
 
 Reads CANARY_UPLOAD_TOKEN from canary-runtime.env (never printed), injects it
-into the template placeholder, and writes
-artifacts/workbuddy_canary_capture_fs_dl.ps1. The repository only ever holds
-the template with the __UPLOAD_TOKEN__ placeholder.
+into each template placeholder, and writes
+artifacts/workbuddy_canary_capture_fs_dl.ps1 and
+artifacts/workbuddy_canary_capture_fs_p.ps1. The repository only ever holds
+the templates with the __UPLOAD_TOKEN__ placeholder.
 """
 import hashlib
 import pathlib
@@ -13,15 +14,15 @@ import sys
 
 DEPLOY = pathlib.Path("/opt/ai-integrity-lab")
 ENV_FILE = DEPLOY / "canary-runtime.env"
-TEMPLATE = DEPLOY / "workbuddy_canary_capture_fs_dl.ps1"
 OUT_DIR = DEPLOY / "artifacts"
-OUT_FILE = OUT_DIR / "workbuddy_canary_capture_fs_dl.ps1"
 PLACEHOLDER = "__UPLOAD_TOKEN__"
+ARTIFACTS = (
+    (DEPLOY / "workbuddy_canary_capture_fs_dl.ps1", "workbuddy_canary_capture_fs_dl.ps1"),
+    (DEPLOY / "workbuddy_canary_capture_fs_p.ps1", "workbuddy_canary_capture_fs_p.ps1"),
+)
 
 if not ENV_FILE.is_file():
     print("ERROR: env file missing"); sys.exit(1)
-if not TEMPLATE.is_file():
-    print("ERROR: template missing"); sys.exit(1)
 
 token = None
 for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
@@ -34,14 +35,17 @@ if not token:
 if not 32 <= len(token) <= 128:
     print("ERROR: token length out of range"); sys.exit(1)
 
-template_text = TEMPLATE.read_text(encoding="utf-8")
-if PLACEHOLDER not in template_text:
-    print("ERROR: placeholder missing in template"); sys.exit(1)
-
-OUT_DIR.mkdir(parents=True, exist_ok=True)
-artifact = template_text.replace(PLACEHOLDER, token)
-OUT_FILE.write_text(artifact, encoding="utf-8")
-assert PLACEHOLDER not in artifact
-print("ARTIFACT-WRITTEN:", OUT_FILE)
-print("ARTIFACT-SHA256:", hashlib.sha256(artifact.encode("utf-8")).hexdigest())
-print("ARTIFACT-BYTES:", len(artifact.encode("utf-8")))
+for template, name in ARTIFACTS:
+    if not template.is_file():
+        print("ERROR: template missing:", template); sys.exit(1)
+    template_text = template.read_text(encoding="utf-8")
+    if PLACEHOLDER not in template_text:
+        print("ERROR: placeholder missing in template:", template); sys.exit(1)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    artifact = template_text.replace(PLACEHOLDER, token)
+    out_file = OUT_DIR / name
+    out_file.write_text(artifact, encoding="utf-8")
+    assert PLACEHOLDER not in artifact
+    print("ARTIFACT-WRITTEN:", out_file)
+    print("ARTIFACT-SHA256:", hashlib.sha256(artifact.encode("utf-8")).hexdigest())
+    print("ARTIFACT-BYTES:", len(artifact.encode("utf-8")))

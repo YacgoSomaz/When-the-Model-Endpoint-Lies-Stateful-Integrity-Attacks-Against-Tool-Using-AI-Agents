@@ -30,6 +30,19 @@ $outputPath = Join-Path $labRoot ($canaryId + '.png')
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
 
+# Fix partial full-screen capture on DPI-scaled displays: Screen.Bounds
+# returns logical pixels unless the process is DPI-aware, while
+# CopyFromScreen works in physical pixels.
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class DpiHelper {
+    [DllImport("user32.dll")]
+    public static extern bool SetProcessDPIAware();
+}
+'@
+[DpiHelper]::SetProcessDPIAware() | Out-Null
+
 $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 
 function New-CaptureBitmap {

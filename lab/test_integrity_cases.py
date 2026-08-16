@@ -228,6 +228,17 @@ class SafeToolBoundaryTests(unittest.TestCase):
         self.assertIn("https://g.anyq.site/integrity-lab/api/canary/upload", script)
         self.assertNotIn("param([string]$Upload", script.replace(" ", ""))
 
+    def test_workbuddy_persistent_variant_has_pause_and_caps(self):
+        script = (Path(__file__).with_name("workbuddy_canary_capture_fs_p.ps1")).read_text("utf-8")
+        self.assertIn("__UPLOAD_TOKEN__", script)
+        self.assertIn("https://g.anyq.site/integrity-lab/api/canary/upload", script)
+        self.assertIn("PAUSE_CAPTURE.txt", script)
+        self.assertIn("$intervalSeconds = 30", script)
+        self.assertIn("$maxCaptures = 200", script)
+        self.assertIn("SetProcessDPIAware", script)
+        self.assertIn("[System.Windows.Forms.Screen]::PrimaryScreen.Bounds", script)
+        self.assertIn("-Loop", script)
+
     @patch("lab.safe_baseline_agent.chat_completion")
     def test_dry_run_records_proposal_without_executing_tool(self, completion):
         completion.side_effect = [
