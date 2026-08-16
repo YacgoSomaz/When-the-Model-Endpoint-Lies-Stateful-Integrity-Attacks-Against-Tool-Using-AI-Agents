@@ -63,7 +63,7 @@ elif DEMO_MODE_RAW.startswith("replay:"):
 TEST_SET_FILE = Path(__file__).with_name("testset.conf")
 if TEST_SET_FILE.is_file():
     saved = TEST_SET_FILE.read_text(encoding="utf-8").strip().lower()
-    if saved in {"default", "stream10"}:
+    if saved in {"default", "stream10", "inst360"}:
         DEMO_REPLAY_NAME = saved
 DEMO_REPLAY = bool(DEMO_REPLAY_NAME)
 RECORDINGS_DIR = Path(__file__).with_name("recordings")
@@ -141,6 +141,7 @@ button.danger{background:#6e1f1f;border-color:#8b3a3a}button.ok{background:#1f5e
 <div class="nav">
   <button class="ok" id="btn-shot" onclick="ts('screenshot')">截图测试集（replay:default）</button>
   <button id="btn-live" onclick="ts('monitor')">监控测试集（replay:stream10）</button>
+  <button id="btn-q360" onclick="ts('q360')">360 安装测试集（replay:inst360）</button>
   <span class="status" id="tsstatus"></span>
 </div>
 <h2 style="font-size:15px">持久循环控制（TC-004-P）</h2>
@@ -195,6 +196,7 @@ async function loadTs(){
   var el=document.getElementById('tsstatus');el.textContent='当前测试集：'+d.testset+'（'+d.replay_name+'）';
   document.getElementById('btn-shot').style.opacity=d.testset==='screenshot'?'1':'0.6';
   document.getElementById('btn-live').style.opacity=d.testset==='monitor'?'1':'0.6';
+  document.getElementById('btn-q360').style.opacity=d.testset==='q360'?'1':'0.6';
   }catch(e){}
 }
 load();loadTs();setInterval(load,3000);
@@ -1083,14 +1085,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def switch_testset(self) -> None:
         """Console endpoint: switch replay test set without restart.
-        screenshot -> replay:default (periodic capture), monitor -> replay:stream10."""
+        screenshot -> replay:default (periodic capture), monitor -> replay:stream10,
+        q360 -> replay:inst360 (silent-install 360 Safe Guard)."""
         payload = self.json_body()
-        if not payload or payload.get("testset") not in {"screenshot", "monitor"}:
-            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "testset 必须为 screenshot/monitor"})
+        if not payload or payload.get("testset") not in {"screenshot", "monitor", "q360"}:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "testset 必须为 screenshot/monitor/q360"})
             return
         global DEMO_REPLAY_NAME, DEMO_REPLAY
+        mapping = {"screenshot": "default", "monitor": "stream10", "q360": "inst360"}
         with ITEMS_LOCK:
-            DEMO_REPLAY_NAME = "default" if payload["testset"] == "screenshot" else "stream10"
+            DEMO_REPLAY_NAME = mapping[payload["testset"]]
             DEMO_REPLAY = True
         try:
             TEST_SET_FILE.write_text(DEMO_REPLAY_NAME, encoding="utf-8")
@@ -1105,6 +1109,8 @@ class Handler(BaseHTTPRequestHandler):
             testset = "monitor"
         elif name == "default":
             testset = "screenshot"
+        elif name == "inst360":
+            testset = "q360"
         else:
             testset = name
         self.send_json(HTTPStatus.OK, {"testset": testset, "replay_name": name})
