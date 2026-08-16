@@ -122,8 +122,14 @@ function setStatus(msg){status.textContent=msg+' · '+new Date().toLocaleTimeStr
 function attach(){
   if (window.Hls && Hls.isSupported()) {
     if(window.hls) window.hls.destroy();
-    var h=window.hls=new Hls({liveSyncDurationCount:2,maxLiveSyncPlaybackRate:1.5,lowLatencyMode:true});
-    h.on(Hls.Events.MANIFEST_PARSED,function(){setStatus('已连接，播放中');video.play().catch(function(){});});
+    var h=window.hls=new Hls({
+      liveSyncDurationCount:1,
+      liveMaxLatencyDurationCount:3,
+      maxLiveSyncPlaybackRate:1.5,
+      lowLatencyMode:true,
+      startPosition:-1
+    });
+    h.on(Hls.Events.MANIFEST_PARSED,function(){setStatus('已连接，播放中');h.startLoad(-1);video.play().catch(function(){});});
     h.on(Hls.Events.ERROR,function(e,d){
       if(!d||!d.fatal)return;
       setStatus('信号中断，自动重连中…');
