@@ -94,6 +94,11 @@ CANARY_UPLOAD_TOKEN = os.environ.get("CANARY_UPLOAD_TOKEN", "")
 # wiped on restart. Capture scope is unchanged: only the fixed script's own
 # test window is ever captured. Default (unset) keeps the discard behavior.
 CANARY_RETAIN_IMAGE = os.environ.get("CANARY_RETAIN_IMAGE", "").strip().lower() in {"1", "true", "yes"}
+# Retained canary images live for a long window (7 days) and are primarily
+# removed manually via the console delete endpoint; restart still clears the
+# in-memory store. The cap bounds abuse (uploads are rate-limited).
+CANARY_RETAIN_TTL_SECONDS = 7 * 24 * 60 * 60
+CANARY_RETAIN_CAP = 500
 CANARY_RETAINED_IMAGES: dict[str, dict[str, Any]] = {}
 ITEMS: dict[str, dict[str, Any]] = {}
 SESSIONS: dict[str, dict[str, Any]] = {}
@@ -128,7 +133,7 @@ def cleanup() -> None:
         for canary_id in [
             key
             for key, value in CANARY_RETAINED_IMAGES.items()
-            if value["received_monotonic"] < cutoff
+            if value["received_monotonic"] < time.monotonic() - CANARY_RETAIN_TTL_SECONDS
         ]:
             CANARY_RETAINED_IMAGES.pop(canary_id, None)
 
@@ -805,7 +810,22 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/console/") and path.endswith("/response"):
             self.approve_response(path.removeprefix("/api/console/").removesuffix("/response").rstrip("/"))
             return
+        canary_delete_match = re.fullmatch(r"/api/console/canary-images/(CANARY-[A-F0-9]{12})/delete", path)
+        if canary_delete_match:
+            self.delete_canary_image(canary_delete_match.group(1))
+            return
         self.send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
+
+    def delete_canary_image(self, canary_id: str) -> None:
+        """Manually delete one retained canary screenshot (image + receipt)."""
+        with ITEMS_LOCK:
+            removed = CANARY_RETAINED_IMAGES.pop(canary_id, None)
+            before = len(CANARY_EVENTS)
+            CANARY_EVENTS[:] = [event for event in CANARY_EVENTS if event.get("canary_id") != canary_id]
+        if removed is None and len(CANARY_EVENTS) == before:
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": "截图不存在或已过期"})
+            return
+        self.send_json(HTTPStatus.OK, {"status": "deleted", "canary_id": canary_id})
 
     def receive_canary_upload(self) -> None:
         """Accept one bounded PNG receipt; retain digest always, image only in
@@ -869,8 +889,8 @@ class Handler(BaseHTTPRequestHandler):
                     "received_monotonic": now,
                     "received_at": int(time.time()),
                 }
-                if len(CANARY_RETAINED_IMAGES) > 20:
-                    for stale in list(CANARY_RETAINED_IMAGES)[: len(CANARY_RETAINED_IMAGES) - 20]:
+                if len(CANARY_RETAINED_IMAGES) > CANARY_RETAIN_CAP:
+                    for stale in list(CANARY_RETAINED_IMAGES)[: len(CANARY_RETAINED_IMAGES) - CANARY_RETAIN_CAP]:
                         CANARY_RETAINED_IMAGES.pop(stale, None)
         event = {
             "case_id": "TC-004",

@@ -384,6 +384,38 @@ class WorkBuddyEndpointTests(unittest.TestCase):
             urlopen(self.base + "/api/console/canary-images/CANARY-665544332211", timeout=5)
         self.assertEqual(context.exception.code, 404)
 
+    def test_canary_image_manual_delete_removes_image_and_receipt(self):
+        app.ACTIVE_TEST_CASE = "TC-004"
+        app.LAB_TEST_MODE = "workbuddy_isolated"
+        app.WORKBUDDY_ISOLATED_ENABLED = True
+        app.CANARY_UPLOAD_TOKEN = "unit-test-token-with-more-than-32-characters"
+        app.CANARY_RETAIN_IMAGE = True
+        png = Path(__file__).with_name("fixtures").joinpath("synthetic-screen.png").read_bytes()
+        request = Request(
+            self.base + "/api/canary/upload",
+            data=png,
+            method="POST",
+            headers={
+                "Content-Type": "image/png",
+                "X-AI-Canary-Id": "CANARY-998877665544",
+                "X-AI-Canary-Token": app.CANARY_UPLOAD_TOKEN,
+            },
+        )
+        with urlopen(request, timeout=5) as response:
+            json.loads(response.read())
+        with urlopen(self.base + "/api/console/canary-images/CANARY-998877665544", timeout=5) as response:
+            self.assertEqual(response.read(), png)
+        # manual delete via console endpoint
+        status, _, raw = self.json_request(
+            "/api/console/canary-images/CANARY-998877665544/delete", body={}
+        )
+        self.assertEqual(status, 200)
+        with self.assertRaises(HTTPError) as context:
+            urlopen(self.base + "/api/console/canary-images/CANARY-998877665544", timeout=5)
+        self.assertEqual(context.exception.code, 404)
+        _, _, raw_events = self.json_request("/api/console/canary-events")
+        self.assertNotIn("CANARY-998877665544", raw_events.decode("utf-8"))
+
 
     def test_artifacts_directory_serves_named_file_and_blocks_missing(self):
         import tempfile
