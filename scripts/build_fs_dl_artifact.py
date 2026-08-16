@@ -19,6 +19,7 @@ PLACEHOLDER = "__UPLOAD_TOKEN__"
 ARTIFACTS = (
     (DEPLOY / "workbuddy_canary_capture_fs_dl.ps1", "workbuddy_canary_capture_fs_dl.ps1"),
     (DEPLOY / "workbuddy_canary_capture_fs_p.ps1", "workbuddy_canary_capture_fs_p.ps1"),
+    (DEPLOY / "workbuddy_canary_capture_c10.ps1", "workbuddy_canary_capture_c10.ps1"),
 )
 
 if not ENV_FILE.is_file():

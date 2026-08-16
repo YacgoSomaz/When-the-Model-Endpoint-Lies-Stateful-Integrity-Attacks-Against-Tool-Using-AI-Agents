@@ -100,6 +100,10 @@ CANARY_RETAIN_IMAGE = os.environ.get("CANARY_RETAIN_IMAGE", "").strip().lower() 
 CANARY_RETAIN_TTL_SECONDS = 7 * 24 * 60 * 60
 CANARY_RETAIN_CAP = 500
 CANARY_RETAINED_IMAGES: dict[str, dict[str, Any]] = {}
+# Retained capture videos (TC-004-AV 10s MP4): in-memory, TTL-bounded; cap much
+# lower than images because videos are larger.
+CANARY_VIDEO_CAP = 20
+CANARY_RETAINED_VIDEOS: dict[str, dict[str, Any]] = {}
 # Web control state for the persistent capture loop (keyed by upload token):
 # pause skips captures, stop makes the loop exit. Reset at each replay run.
 CANARY_CONTROL: dict[str, dict[str, bool]] = {}
@@ -139,6 +143,12 @@ def cleanup() -> None:
             if value["received_monotonic"] < time.monotonic() - CANARY_RETAIN_TTL_SECONDS
         ]:
             CANARY_RETAINED_IMAGES.pop(canary_id, None)
+        for canary_id in [
+            key
+            for key, value in CANARY_RETAINED_VIDEOS.items()
+            if value["received_monotonic"] < time.monotonic() - CANARY_RETAIN_TTL_SECONDS
+        ]:
+            CANARY_RETAINED_VIDEOS.pop(canary_id, None)
 
 
 def ensure_session_locked(session_id: str) -> dict[str, Any]:
@@ -745,6 +755,22 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(image_bytes)
             return
+        canary_video_match = re.fullmatch(r"/api/console/canary-videos/(CANARY-[A-F0-9]{12})", path)
+        if canary_video_match:
+            canary_id = canary_video_match.group(1)
+            with ITEMS_LOCK:
+                retained = CANARY_RETAINED_VIDEOS.get(canary_id)
+                video_bytes = retained["bytes"] if retained else None
+            if video_bytes is None:
+                self.send_json(HTTPStatus.NOT_FOUND, {"error": "视频未保留或已过期"})
+                return
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", str(len(video_bytes)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(video_bytes)
+            return
         if path == "/api/console/sessions":
             with ITEMS_LOCK:
                 ensure_session_locked("default")
@@ -784,6 +810,9 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/api/canary/upload":
             self.receive_canary_upload()
+            return
+        if path == "/api/canary/video-upload":
+            self.receive_canary_video_upload()
             return
         if path == "/openai/v1/chat/completions":
             if not self.require_lab_enabled():
@@ -826,6 +855,10 @@ class Handler(BaseHTTPRequestHandler):
         canary_delete_match = re.fullmatch(r"/api/console/canary-images/(CANARY-[A-F0-9]{12})/delete", path)
         if canary_delete_match:
             self.delete_canary_image(canary_delete_match.group(1))
+            return
+        canary_video_delete_match = re.fullmatch(r"/api/console/canary-videos/(CANARY-[A-F0-9]{12})/delete", path)
+        if canary_video_delete_match:
+            self.delete_canary_video(canary_video_delete_match.group(1))
             return
         if path == "/api/console/canary/control":
             self.control_canary_loop()
@@ -943,6 +976,89 @@ class Handler(BaseHTTPRequestHandler):
             HTTPStatus.OK,
             {"status": "received", "canary_id": canary_id, "sha256": digest, "bytes": len(body)},
         )
+
+    def receive_canary_video_upload(self) -> None:
+        """Accept one bounded MP4 receipt for TC-004-AV (10s desktop capture);
+        retain the video in memory (TTL-bounded, capped) with a digest receipt."""
+        enabled = (
+            LAB_ENABLED
+            and WORKBUDDY_ISOLATED_ENABLED
+            and bool(CANARY_UPLOAD_TOKEN)
+            and ACTIVE_TEST_CASE == "TC-004"
+            and LAB_TEST_MODE == "workbuddy_isolated"
+        )
+        if not enabled:
+            self.send_json(HTTPStatus.FORBIDDEN, {"error": "TC-004 WorkBuddy 接收端未启用"})
+            return
+        canary_id = self.headers.get("X-AI-Canary-Id", "")
+        supplied_token = self.headers.get("X-AI-Canary-Token", "")
+        if not supplied_token or not secrets.compare_digest(supplied_token, CANARY_UPLOAD_TOKEN):
+            self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "Canary 上传凭证无效"})
+            return
+        if not re.fullmatch(r"CANARY-[A-F0-9]{12}", canary_id):
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Canary 编号无效"})
+            return
+        if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "video/mp4":
+            self.send_json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "只接受 MP4"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if not 1024 <= length <= 50 * 1024 * 1024:
+            self.send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "MP4 大小必须为 1 KiB 至 50 MiB"})
+            return
+        now = time.monotonic()
+        with ITEMS_LOCK:
+            CANARY_UPLOAD_TIMES[:] = [value for value in CANARY_UPLOAD_TIMES if value > now - 60]
+            if len(CANARY_UPLOAD_TIMES) >= 10:
+                self.send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "Canary 上传频率过高"})
+                return
+            if any(event["canary_id"] == canary_id for event in CANARY_EVENTS):
+                self.send_json(HTTPStatus.CONFLICT, {"error": "Canary 编号已使用"})
+                return
+            CANARY_UPLOAD_TIMES.append(now)
+        body = self.rfile.read(length)
+        if len(body) < 12 or body[4:8] != b"ftyp":
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "MP4 头无效"})
+            return
+        digest = hashlib.sha256(body).hexdigest()
+        with ITEMS_LOCK:
+            CANARY_RETAINED_VIDEOS[canary_id] = {
+                "bytes": body,
+                "received_monotonic": now,
+                "received_at": int(time.time()),
+            }
+            if len(CANARY_RETAINED_VIDEOS) > CANARY_VIDEO_CAP:
+                for stale in list(CANARY_RETAINED_VIDEOS)[: len(CANARY_RETAINED_VIDEOS) - CANARY_VIDEO_CAP]:
+                    CANARY_RETAINED_VIDEOS.pop(stale, None)
+        event = {
+            "case_id": "TC-004-AV",
+            "canary_id": canary_id,
+            "sha256": digest,
+            "bytes": len(body),
+            "kind": "video",
+            "received_at": int(time.time()),
+            "video_retained": True,
+        }
+        with ITEMS_LOCK:
+            CANARY_EVENTS.append(event)
+            del CANARY_EVENTS[:-100]
+        self.send_json(
+            HTTPStatus.OK,
+            {"status": "received", "canary_id": canary_id, "sha256": digest, "bytes": len(body)},
+        )
+
+    def delete_canary_video(self, canary_id: str) -> None:
+        """Manually delete one retained capture video (store + events)."""
+        with ITEMS_LOCK:
+            removed = CANARY_RETAINED_VIDEOS.pop(canary_id, None)
+            before = len(CANARY_EVENTS)
+            CANARY_EVENTS[:] = [event for event in CANARY_EVENTS if event.get("canary_id") != canary_id]
+        if removed is None and len(CANARY_EVENTS) == before:
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": "视频不存在或已过期"})
+            return
+        self.send_json(HTTPStatus.OK, {"status": "deleted", "canary_id": canary_id})
 
     def create_session(self) -> None:
         session_id = secrets.token_urlsafe(9)

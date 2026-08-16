@@ -74,6 +74,7 @@ class WorkBuddyEndpointTests(unittest.TestCase):
         app.CANARY_UPLOAD_TOKEN = ""
         app.CANARY_RETAIN_IMAGE = False
         app.CANARY_RETAINED_IMAGES.clear()
+        app.CANARY_RETAINED_VIDEOS.clear()
 
     def json_request(self, path, body=None, authorization=False):
         data = None if body is None else json.dumps(body, ensure_ascii=False).encode()
@@ -295,6 +296,73 @@ class WorkBuddyEndpointTests(unittest.TestCase):
         self.assertEqual(events[-1]["sha256"], expected)
         self.assertFalse(events[-1]["image_retained"])
         self.assertNotIn(png[:32].hex(), json.dumps(events))
+
+    def test_canary_video_upload_keeps_digest_and_retains_video(self):
+        app.ACTIVE_TEST_CASE = "TC-004"
+        app.LAB_TEST_MODE = "workbuddy_isolated"
+        app.WORKBUDDY_ISOLATED_ENABLED = True
+        app.CANARY_UPLOAD_TOKEN = "unit-test-token-with-more-than-32-characters"
+        mp4 = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00" + b"\x00" * 2048
+        request = Request(
+            self.base + "/api/canary/video-upload",
+            data=mp4,
+            method="POST",
+            headers={
+                "Content-Type": "video/mp4",
+                "X-AI-Canary-Id": "CANARY-A1B2C3D4E5F6",
+                "X-AI-Canary-Token": app.CANARY_UPLOAD_TOKEN,
+            },
+        )
+        with urlopen(request, timeout=5) as response:
+            receipt = json.loads(response.read())
+        expected = hashlib.sha256(mp4).hexdigest()
+        self.assertEqual(receipt["sha256"], expected)
+        _, _, raw = self.json_request("/api/console/canary-events")
+        events = json.loads(raw)["events"]
+        self.assertEqual(events[-1]["kind"], "video")
+        self.assertTrue(events[-1]["video_retained"])
+        with urlopen(self.base + "/api/console/canary-videos/CANARY-A1B2C3D4E5F6", timeout=5) as response:
+            self.assertEqual(response.read(), mp4)
+
+    def test_canary_video_upload_rejects_wrong_token(self):
+        app.ACTIVE_TEST_CASE = "TC-004"
+        app.LAB_TEST_MODE = "workbuddy_isolated"
+        app.WORKBUDDY_ISOLATED_ENABLED = True
+        app.CANARY_UPLOAD_TOKEN = "unit-test-token-with-more-than-32-characters"
+        mp4 = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00" + b"\x00" * 2048
+        request = Request(
+            self.base + "/api/canary/video-upload",
+            data=mp4,
+            method="POST",
+            headers={
+                "Content-Type": "video/mp4",
+                "X-AI-Canary-Id": "CANARY-ABCDEF123456",
+                "X-AI-Canary-Token": "wrong-token-with-more-than-32-characters",
+            },
+        )
+        with self.assertRaises(HTTPError) as context:
+            urlopen(request, timeout=5)
+        self.assertEqual(context.exception.code, 401)
+
+    def test_canary_video_upload_rejects_non_mp4_content_type(self):
+        app.ACTIVE_TEST_CASE = "TC-004"
+        app.LAB_TEST_MODE = "workbuddy_isolated"
+        app.WORKBUDDY_ISOLATED_ENABLED = True
+        app.CANARY_UPLOAD_TOKEN = "unit-test-token-with-more-than-32-characters"
+        mp4 = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00" + b"\x00" * 2048
+        request = Request(
+            self.base + "/api/canary/video-upload",
+            data=mp4,
+            method="POST",
+            headers={
+                "Content-Type": "image/png",
+                "X-AI-Canary-Id": "CANARY-001122334455",
+                "X-AI-Canary-Token": app.CANARY_UPLOAD_TOKEN,
+            },
+        )
+        with self.assertRaises(HTTPError) as context:
+            urlopen(request, timeout=5)
+        self.assertEqual(context.exception.code, 415)
 
     def test_canary_upload_is_disabled_without_explicit_execution_ack(self):
         app.ACTIVE_TEST_CASE = "TC-004"
