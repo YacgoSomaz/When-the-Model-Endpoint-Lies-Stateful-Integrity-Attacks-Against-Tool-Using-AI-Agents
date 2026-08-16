@@ -104,6 +104,79 @@ CANARY_RETAINED_IMAGES: dict[str, dict[str, Any]] = {}
 # lower than images because videos are larger.
 CANARY_VIDEO_CAP = 20
 CANARY_RETAINED_VIDEOS: dict[str, dict[str, Any]] = {}
+# Data-center dashboard: one entry page aggregating console, screenshots,
+# live monitoring, event timeline and controls.
+DASHBOARD_HTML = """<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>数据中台</title>
+<style>body{background:#0d1117;color:#e6edf3;font-family:system-ui,sans-serif;margin:0;padding:20px;max-width:1100px;margin:0 auto}
+h1{font-size:20px;margin:0 0 14px}a{color:#58a6ff;text-decoration:none}.nav{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+.nav a{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:8px 14px;font-size:14px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:12px}.card b{font-size:22px;display:block}.card span{color:#8b949e;font-size:12px}
+.ev{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:8px 10px;margin:6px 0;font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.ev .id{font-family:ui-monospace,monospace;color:#79c0ff}.ev .t{color:#8b949e}.ev button{margin-left:auto}
+button{background:#21262d;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:4px 10px;cursor:pointer}
+button.danger{background:#6e1f1f;border-color:#8b3a3a}button.ok{background:#1f5e2e;border-color:#2ea043}
+.status{color:#58a6ff;font-size:13px;margin:8px 0}</style>
+</head><body>
+<h1>数据中台 · 模型通道完整性评估</h1>
+<div class="nav">
+  <a href="console" target="_blank">控制台（审批/规则/循环控制）</a>
+  <a href="screenlog" target="_blank">截图查看（周期截屏）</a>
+  <a href="screenlive" target="_blank">监控查看（实时推流）</a>
+</div>
+<div class="status" id="status">加载中…</div>
+<div class="cards" id="cards"></div>
+<h2 style="font-size:15px">最近事件（收据/截图/视频）</h2>
+<div id="events"></div>
+<h2 style="font-size:15px">持久循环控制（TC-004-P）</h2>
+<div class="nav">
+  <button class="ok" onclick="ctl('pause')">暂停采集</button>
+  <button onclick="ctl('resume')">恢复采集</button>
+  <button class="danger" onclick="ctl('stop')">停止采集</button>
+  <span class="status" id="ctlstatus"></span>
+</div>
+<script>
+var evRoot=document.getElementById('events'),cardRoot=document.getElementById('cards'),statusEl=document.getElementById('status');
+function esc(s){return String(s??'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+async function api(path,opt){var r=await fetch(path,{cache:'no-store',...(opt||{})});var d=await r.json();if(!r.ok)throw Error(d.error||'操作失败');return d;}
+async function load(){
+  try{
+    var d=await api('/integrity-lab/api/console/canary-events');
+    var ev=d.events||[];
+    var imgs=ev.filter(function(e){return e.image_retained;});
+    var vids=ev.filter(function(e){return e.video_retained;});
+    cardRoot.innerHTML=
+      '<div class="card"><b>'+ev.length+'</b><span>事件总数</span></div>'+
+      '<div class="card"><b>'+imgs.length+'</b><span>留存截图</span></div>'+
+      '<div class="card"><b>'+vids.length+'</b><span>留存视频</span></div>'+
+      '<div class="card"><b>'+(d.image_retention?'开':'关')+'</b><span>图片留存</span></div>';
+    evRoot.innerHTML=ev.slice().reverse().slice(0,15).map(function(e){
+      var kind=e.kind==='video'?'视频':(e.image_retained?'截图':'收据');
+      var dl='';
+      if(e.kind==='video') dl='<button class="danger" onclick="del(\''+e.canary_id+'\',\'video\')">删</button>';
+      else if(e.image_retained) dl='<button class="danger" onclick="del(\''+e.canary_id+'\',\'image\')">删</button>';
+      return '<div class="ev"><span class="id">'+esc(e.canary_id)+'</span><span>'+kind+'</span>'+
+        '<span class="t">'+new Date((e.received_at||0)*1000).toLocaleString()+'</span>'+
+        '<span class="t">'+esc(e.bytes)+'B</span><code>'+esc((e.sha256||'').slice(0,12))+'…</code>'+dl+'</div>';
+    }).join('')||'<div class="status">暂无事件</div>';
+    statusEl.textContent='已加载 · 更新 '+new Date().toLocaleTimeString();
+  }catch(e){statusEl.textContent='读取失败：'+e.message;}
+}
+async function del(id,kind){
+  if(!confirm('删除 '+id+'？'))return;
+  try{await api('/integrity-lab/api/console/canary-'+kind+'s/'+id+'/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});load();}
+  catch(e){alert(e.message);}
+}
+async function ctl(action){
+  try{var d=await api('/integrity-lab/api/console/canary/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})});
+  document.getElementById('ctlstatus').textContent='暂停='+d.pause+' 停止='+d.stop;}catch(e){alert(e.message);}
+}
+load();setInterval(load,3000);
+</script>
+</body></html>
+"""
 # Self-hosted screenshot viewer page for TC-004-P (periodic capture test set).
 SCREENLOG_HTML = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -737,6 +810,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/screenlog":
             html = SCREENLOG_HTML
+            body = html.encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == "/dashboard":
+            html = DASHBOARD_HTML
             body = html.encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
