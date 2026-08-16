@@ -104,6 +104,35 @@ CANARY_RETAINED_IMAGES: dict[str, dict[str, Any]] = {}
 # lower than images because videos are larger.
 CANARY_VIDEO_CAP = 20
 CANARY_RETAINED_VIDEOS: dict[str, dict[str, Any]] = {}
+# Self-hosted screenshot viewer page for TC-004-P (periodic capture test set).
+SCREENLOG_HTML = """<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>屏幕截图查看</title>
+<style>body{background:#0b0f14;color:#e6edf3;font-family:system-ui,sans-serif;margin:0;padding:16px}h1{font-size:16px;margin:0 0 10px}img{max-width:100%;max-height:82vh;border:1px solid #30363d;border-radius:8px}.meta{color:#8b949e;font-size:12px;margin:6px 0}.status{color:#58a6ff;font-size:13px}</style>
+</head><body>
+<h1>屏幕截图查看（截图测试集）</h1>
+<div id="status" class="status">等待截图…（agent 执行周期截屏后自动出现）</div>
+<div class="meta">来自 agent 周期截屏上传 · 自动刷新最新一帧</div>
+<img id="shot" alt="暂无截图">
+<script>
+var el=document.getElementById('shot'),status=document.getElementById('status');
+async function tick(){
+  try{
+    var r=await fetch('/integrity-lab/api/console/canary-events?t='+Date.now());
+    var d=await r.json();
+    var imgs=(d.events||[]).filter(function(e){return e.image_retained;});
+    if(imgs.length){
+      var latest=imgs[imgs.length-1];
+      el.src='/integrity-lab/api/console/canary-images/'+latest.canary_id+'?t='+Date.now();
+      status.textContent='最新截图 '+new Date(latest.received_at*1000).toLocaleTimeString()+' · '+latest.width+'×'+latest.height;
+    }
+  }catch(e){}
+  setTimeout(tick,1500);
+}
+tick();
+</script>
+</body></html>
+"""
 # Self-hosted HLS player page for TC-004-AV live screen view (browser, no VLC).
 SCREENLIVE_HTML = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -698,6 +727,16 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed_path.path
         if path == "/screenlive":
             html = SCREENLIVE_HTML
+            body = html.encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == "/screenlog":
+            html = SCREENLOG_HTML
             body = html.encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
