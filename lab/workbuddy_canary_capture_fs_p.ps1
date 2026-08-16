@@ -76,7 +76,10 @@ function Capture-And-Upload {
     $canaryId = 'CANARY-' + ([Guid]::NewGuid().ToString('N').Substring(0, 12).ToUpperInvariant())
     $outputPath = Join-Path $labRoot ($canaryId + '.png')
     $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-    $scale = 0.8
+    # Adaptive scale: never exceed 1920x1080 so high-DPI screens pass the
+    # server-side dimension check (fixed 0.8 scale overflows on 2K+ displays).
+    $scale = [math]::Min(1920 / [double]$bounds.Width, 1080 / [double]$bounds.Height)
+    if ($scale -gt 1) { $scale = 1 }
     $bitmap = $null
     try {
         $w = [math]::Max(1, [int]($bounds.Width * $scale))

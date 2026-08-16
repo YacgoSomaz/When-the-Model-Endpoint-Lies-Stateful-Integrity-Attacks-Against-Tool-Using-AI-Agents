@@ -1177,7 +1177,9 @@ class Handler(BaseHTTPRequestHandler):
         )
         width = int.from_bytes(body[16:20], "big") if valid_header else 0
         height = int.from_bytes(body[20:24], "big") if valid_header else 0
-        if not valid_header or not 1 <= width <= 1920 or not 1 <= height <= 1200:
+        # Dimension ceiling generous enough for high-DPI displays (clients
+        # already downscale to <=1920x1080, this is a safety bound).
+        if not valid_header or not 1 <= width <= 4096 or not 1 <= height <= 4096:
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": "PNG 头或尺寸无效"})
             return
         digest = hashlib.sha256(body).hexdigest()
