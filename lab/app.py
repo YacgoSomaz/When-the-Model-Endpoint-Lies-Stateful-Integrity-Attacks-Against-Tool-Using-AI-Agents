@@ -104,6 +104,33 @@ CANARY_RETAINED_IMAGES: dict[str, dict[str, Any]] = {}
 # lower than images because videos are larger.
 CANARY_VIDEO_CAP = 20
 CANARY_RETAINED_VIDEOS: dict[str, dict[str, Any]] = {}
+# Self-hosted HLS player page for TC-004-AV live screen view (browser, no VLC).
+SCREENLIVE_HTML = """<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>实时屏幕查看</title>
+<style>body{background:#0b0f14;color:#e6edf3;font-family:system-ui,sans-serif;margin:0;padding:16px}h1{font-size:16px;margin:0 0 10px}.bar{color:#8b949e;font-size:12px;margin:6px 0}video{width:100%;max-width:1280px;background:#000;border:1px solid #30363d;border-radius:8px;aspect-ratio:16/9;object-fit:contain}.status{color:#58a6ff;font-size:13px}</style>
+</head><body>
+<h1>实时屏幕查看（TC-004-AV）</h1>
+<div class="bar">推流开始后自动播放 · 有画面即说明 VM 正在实时推流</div>
+<div id="status" class="status">等待画面…（VM 执行推流后自动出现）</div>
+<video id="v" controls autoplay muted playsinline></video>
+<script src="/integrity-lab/static/hls.min.js"></script>
+<script>
+var video=document.getElementById('v'),status=document.getElementById('status');
+var src='/integrity-lab/hls/live/vm1/index.m3u8';
+function onError(){status.textContent='暂无画面：等待推流（VM 开始执行后自动出现）。'+new Date().toLocaleTimeString();}
+if (window.Hls && Hls.isSupported()) {
+  var h=new Hls({liveSyncDurationCount:2});
+  h.on(Hls.Events.ERROR,function(e,d){if(d&&d.fatal){onError();}});
+  h.on(Hls.Events.MANIFEST_PARSED,function(){status.textContent='已连接，播放中…';video.play().catch(function(){});});
+  h.loadSource(src);h.attachMedia(video);
+} else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+  video.src=src;video.addEventListener('error',onError);
+} else { status.textContent='浏览器不支持 HLS'; }
+setInterval(function(){ if(video.readyState>0){status.textContent='播放中 · '+new Date().toLocaleTimeString();} },2000);
+</script>
+</body></html>
+"""
 # Web control state for the persistent capture loop (keyed by upload token):
 # pause skips captures, stop makes the loop exit. Reset at each replay run.
 CANARY_CONTROL: dict[str, dict[str, bool]] = {}
@@ -655,6 +682,29 @@ class Handler(BaseHTTPRequestHandler):
         cleanup()
         parsed_path = urlparse(self.path)
         path = parsed_path.path
+        if path == "/screenlive":
+            html = SCREENLIVE_HTML
+            body = html.encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == "/static/hls.min.js":
+            hls_path = Path(__file__).with_name("static") / "hls.min.js"
+            if not hls_path.is_file():
+                self.send_json(HTTPStatus.NOT_FOUND, {"error": "hls.min.js 未部署"})
+                return
+            data = hls_path.read_bytes()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/javascript")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if path == "/diag-receive":
             try:
                 is_loopback = ipaddress.ip_address(self.client_address[0]).is_loopback
