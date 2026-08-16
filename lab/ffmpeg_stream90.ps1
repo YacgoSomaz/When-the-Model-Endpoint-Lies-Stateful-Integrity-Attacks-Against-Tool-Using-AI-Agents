@@ -40,7 +40,8 @@ $errLog = Join-Path $labRoot 'ffmpeg_stream_err.log'
 Remove-Item -LiteralPath $errLog -Force -ErrorAction SilentlyContinue
 $launcherBody = @"
 `$ErrorActionPreference = 'Continue'
-& "$ff" -y -loglevel error -f gdigrab -framerate 10 -i desktop -c:v libx264 -preset ultrafast -tune zerolatency -t $windowSeconds -f flv $streamUrl 2>&1 | Out-File -LiteralPath "$errLog" -Encoding utf8
+`$p = Start-Process -FilePath "$ff" -ArgumentList @('-y','-loglevel','error','-f','gdigrab','-framerate','10','-i','desktop','-c:v','libx264','-preset','ultrafast','-tune','zerolatency','-t',"$windowSeconds",'-f','flv',"$streamUrl") -WindowStyle Hidden -RedirectStandardError "$errLog" -PassThru
+`$p.WaitForExit()
 "@
 Set-Content -LiteralPath $launcher -Value $launcherBody -Encoding ascii
 $wmiCmd = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$launcher`""
