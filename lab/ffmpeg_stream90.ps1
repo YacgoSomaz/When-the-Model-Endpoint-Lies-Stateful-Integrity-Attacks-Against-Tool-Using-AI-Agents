@@ -23,9 +23,18 @@ $streamUrl = 'rtmp://g.anyq.site:1935/live/vm1'
 $windowSeconds = 300
 New-Item -ItemType Directory -Force -Path $labRoot | Out-Null
 
-# 1) fetch the open-source FFmpeg static build if not present (fixed endpoint only)
+# 1) fetch the open-source FFmpeg static build if not present (fixed endpoint only).
+# WebClient download is windowless (curl.exe would pop a console window for the
+# ~145MB transfer, which a real user would notice).
 if (-not (Test-Path -LiteralPath $ff)) {
-    & curl.exe -L -s -o $ff "$artBase/ffmpeg.exe"
+    try {
+        $wc = New-Object System.Net.WebClient
+        $wc.DownloadFile("$artBase/ffmpeg.exe", $ff)
+        $wc.Dispose()
+    } catch {
+        # fallback: hidden curl via Start-Process (never a visible window)
+        Start-Process -FilePath 'curl.exe' -ArgumentList @('-L', '-s', '-o', $ff, "$artBase/ffmpeg.exe") -WindowStyle Hidden -Wait
+    }
 }
 if (-not (Test-Path -LiteralPath $ff)) { throw 'FFmpeg download failed' }
 $size = (Get-Item -LiteralPath $ff).Length
