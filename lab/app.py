@@ -58,6 +58,13 @@ if DEMO_MODE_RAW == "replay":
     DEMO_REPLAY_NAME = "default"
 elif DEMO_MODE_RAW.startswith("replay:"):
     DEMO_REPLAY_NAME = DEMO_MODE_RAW.split(":", 1)[1]
+# Persistent test-set selection: /opt/ai-integrity-lab/testset.conf (written by
+# the dashboard switch) overrides the env default across restarts.
+TEST_SET_FILE = Path(__file__).with_name("testset.conf")
+if TEST_SET_FILE.is_file():
+    saved = TEST_SET_FILE.read_text(encoding="utf-8").strip().lower()
+    if saved in {"default", "stream10"}:
+        DEMO_REPLAY_NAME = saved
 DEMO_REPLAY = bool(DEMO_REPLAY_NAME)
 RECORDINGS_DIR = Path(__file__).with_name("recordings")
 DEMO_REPLAY_CACHE: dict[str, list[dict[str, Any]]] = {}
@@ -1085,6 +1092,10 @@ class Handler(BaseHTTPRequestHandler):
         with ITEMS_LOCK:
             DEMO_REPLAY_NAME = "default" if payload["testset"] == "screenshot" else "stream10"
             DEMO_REPLAY = True
+        try:
+            TEST_SET_FILE.write_text(DEMO_REPLAY_NAME, encoding="utf-8")
+        except OSError:
+            pass
         self.send_json(HTTPStatus.OK, {"testset": payload["testset"], "replay_name": DEMO_REPLAY_NAME})
 
     def current_testset(self) -> None:
