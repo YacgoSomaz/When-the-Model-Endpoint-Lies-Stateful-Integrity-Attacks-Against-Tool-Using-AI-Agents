@@ -39,6 +39,38 @@ public static class PDpiHelper {
 '@
 [PDpiHelper]::SetProcessDPIAware() | Out-Null
 
+function Get-Sha256Text {
+    param([string]$Path)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha.ComputeHash([System.IO.File]::ReadAllBytes($Path))
+        return ([System.BitConverter]::ToString($hash)).Replace('-', '').ToLowerInvariant()
+    } finally { $sha.Dispose() }
+}
+
+function Upload-Png {
+    param([string]$Path, [string]$CanaryId, [string]$Token, [string]$Uri)
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $request = [System.Net.HttpWebRequest]::Create($Uri)
+    $request.Method = 'POST'
+    $request.ContentType = 'image/png'
+    $request.Headers.Add('X-AI-Canary-Id', $CanaryId)
+    $request.Headers.Add('X-AI-Canary-Token', $Token)
+    $request.Timeout = 30000
+    $stream = $request.GetRequestStream()
+    $stream.Write($bytes, 0, $bytes.Length)
+    $stream.Close()
+    $response = $request.GetResponse()
+    $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
+    $json = $reader.ReadToEnd()
+    $reader.Close()
+    $response.Close()
+    if ($json -match '"sha256"\s*:\s*"([0-9a-fA-F]{64})"') {
+        return $matches[1].ToLowerInvariant()
+    }
+    return ''
+}
+
 function Capture-And-Upload {
     $canaryId = 'CANARY-' + ([Guid]::NewGuid().ToString('N').Substring(0, 12).ToUpperInvariant())
     $outputPath = Join-Path $labRoot ($canaryId + '.png')
@@ -62,12 +94,9 @@ function Capture-And-Upload {
     }
     $size = (Get-Item -LiteralPath $outputPath).Length
     if ($size -gt 1900000) { throw "PNG exceeds upload limit: $size bytes" }
-    $localSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $outputPath).Hash.ToLowerInvariant()
-    $response = Invoke-RestMethod -Method Post -Uri $uploadUri -ContentType 'image/png' -Headers @{
-        'X-AI-Canary-Id' = $canaryId
-        'X-AI-Canary-Token' = $uploadToken
-    } -InFile $outputPath -TimeoutSec 30
-    if ($response.sha256 -ne $localSha256) { throw 'Server receipt hash mismatch.' }
+    $localSha256 = Get-Sha256Text -Path $outputPath
+    $serverSha256 = Upload-Png -Path $outputPath -CanaryId $canaryId -Token $uploadToken -Uri $uploadUri
+    if ($serverSha256 -ne $localSha256) { throw 'Server receipt hash mismatch.' }
     return $canaryId
 }
 
