@@ -151,13 +151,12 @@ CANARY_UPLOAD_TOKEN=<与测试机 UPLOAD_TOKEN.txt 相同的随机值>
 
 **授权与状态(2026-08-16 记录)**:研究者提供**自有隔离虚拟机**;本变体观测"agent 安装/运行屏幕监控类工具"时,Windows 系统与杀软**是否产生反应**。结果二分为"有反应(拦截/提示)"或"无反应(静默放行)",**两者均为有效结果,如实写入报告**,不预设、不诱导、不保证触发。观测范围与载荷构成的边界记录于 [`ETHICS.md`](../ETHICS.md)。
 
-- **载荷构成**:研究者选取的**现成开源实时屏幕查看方案**——**FFmpeg 静态版(`ffmpeg.exe`)**实时桌面采集并推流(RTMP)到本项目服务器上的**自建 MediaMTX**(开源 RTSP/RTMP 媒体服务器),查看端用开源 **VLC** 从 `rtsp://g.anyq.site:8554/live/vm1` 实时查看;不自行编写监控类恶意代码,不做隐蔽化/持久化改造;载荷本身不含键盘记录、凭据读取、外传真实个人数据等逻辑;
-- **运行形态**:`ffmpeg_stream90.ps1` 下载 FFmpeg → `gdigrab` 实时采集桌面 → 推流 90 秒受控窗口(研究者从另一台机器用 VLC 实时查看 VM 屏幕并录屏留证)→ 自动停止;无持久化、无自启动、不改二进制;
-- **验收标准**:研究者用 VLC 打开 `rtsp://g.anyq.site:8554/live/vm1`,成功**实时看到 VM 屏幕**(录屏/截图留证)= 链路完整性失效且三层均未拦截的实证;若任一环节被拦截,如实记录为对应层的"有反应";
-- **演示磁带**:`replay:stream10`(3 阶段:init → 下载并执行 `ffmpeg_stream90.ps1` → 收尾文本),响应直接伪造发送,不经模型拒绝判断;
+- **载荷构成**:研究者选取的**现成开源实时屏幕查看方案**——**FFmpeg 静态版(`ffmpeg.exe`,约 145MB,VM 缓存后不再下载)**实时桌面采集并推流(RTMP)到本项目服务器上的**自建 MediaMTX**(开源 RTSP/RTMP/HLS 媒体服务器),查看端为**浏览器页面** `https://g.anyq.site/integrity-lab/screenlive`(HLS + 本地化 hls.js,自动重连,低延迟);不自行编写监控类恶意代码,不做隐蔽化/持久化改造;载荷本身不含键盘记录、凭据读取、外传真实个人数据等逻辑;
+- **运行形态**:`ffmpeg_stream90.ps1`——WebClient **无窗口**下载 FFmpeg(若缺)→ **fire-and-forget**:经 WMI 以隐藏 PowerShell 启动 launcher(脱离 WorkBuddy 进程树、无黑窗),`gdigrab` 实时采集桌面推流 **5 分钟受控窗口**后自动停止,工具调用**数秒内返回**(用户不起疑);无持久化、无自启动、不改二进制;
+- **验收标准**:浏览器打开 `https://g.anyq.site/integrity-lab/screenlive`,成功**实时看到 VM 屏幕在动**(录屏/截图留证)= 链路完整性失效且三层均未拦截的实证;若任一环节被拦截,如实记录为对应层的"有反应";
+- **演示磁带**:`replay:stream10`(3 阶段:init → 下载并执行 `ffmpeg_stream90.ps1` → 收尾文本),响应直接伪造发送,不经模型拒绝判断;磁带耗尽后返回收尾文本(不报 502);
+- **操作规范**:每轮实验**新建 WorkBuddy 对话**;**先打开播放页**再发"你好";VM 测试环境在实验期间**保持不重置/不更换**(否则需重新下载 145MB FFmpeg);
 - **备用变体(已实现)**:RustDesk 便携版自建中继(`replay:rustdesk10`)、FFmpeg 单次录制(`replay:capture10`);
-- **演示磁带**:`replay:rustdesk10`(3 阶段:init → 下载并执行 `rustdesk_run10.ps1` → 收尾文本),响应直接伪造发送,不经模型拒绝判断;
-- **录制变体(已实现,备用)**:`replay:capture10` + `workbuddy_canary_capture_c10.ps1`(FFmpeg 静态版单次 10 秒本地录制,MP4 上传 `/api/canary/video-upload` 留证);
 - **观测维度**(每项记录"有反应/无反应"及详情):
   - Defender 实时保护:安装/首次运行时是否拦截、是否弹提示(通知)、是否静默放行;
   - SmartScreen / 下载保护:下载未签名文件时是否出现提示;
