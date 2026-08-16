@@ -54,7 +54,7 @@
 - 部署配置当前标示为：`TC-004`、`workbuddy_isolated`、`CANARY_RETAIN_IMAGE=1`、`LAB_DEBUG_LOG=1`；演示模式可用 `LAB_DEMO_MODE`（`display_deception` / `record` / `replay:default`）切换；
 - 截图留存：内存 TTL 7 天、上限 500 张；控制台按采集时间回看、手动删除、循环暂停/恢复/停止；重启即清；
 - 2026-08-16 已产出收据哈希与脱敏阶段记录（`evidence/private/canary-acceptance-20260816/`），**仍缺 OFF 对照与三次以上重复**；
-- **规划中：TC-004-AV** —— 隔离 VM 内观测用户/系统/杀软三方对 agent 安装持久化植入体的感知（Defender/AMSI 拦截、提示或静默放行；载荷运行时惰性）；完成后联系 WorkBuddy/相关 AI 厂商做协调披露；
+- **TC-004-AV（方案已记录，待执行）**：隔离 VM 内观测用户/系统/杀软三方感知——Defender/AMSI 拦截、提示或静默放行、Windows 事件日志、快照前后对比、用户感知记录；载荷签名层真实触发（EICAR/AMSI 触发模式）、行为层惰性，不含真实恶意逻辑；≥3 次重复 + OFF 对照；完成后联系 WorkBuddy/相关 AI 厂商做协调披露；边界见 `docs/TEST_CASES.md`；
 - 线上尚无正式验收收据。部署后的传输预检已重启清空，不能当作 WorkBuddy 实机证据。
 
 不要在仓库、终端输出、控制台截图或交接文本中记录 API Key、SSH 密码、上传 Token、Cookie、完整未脱敏提示词或个人路径。运行时凭证不属于 Git 管理范围。
