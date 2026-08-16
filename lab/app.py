@@ -1025,8 +1025,14 @@ class Handler(BaseHTTPRequestHandler):
                 session["request_count"] = session.get("request_count", 0) + 1
                 stage = session["request_count"] - 1
                 if stage == 1:
-                    # New demo run: reset the persistent loop control state.
-                    CANARY_CONTROL[CANARY_UPLOAD_TOKEN] = {"pause": False, "stop": False}
+                    # New demo run: clear pause but NEVER clear stop.
+                    # stop is a terminal state; the previous code reset both to
+                    # False on every stage-1 replay, which made the console
+                    # stop button ineffective while the tape kept being replayed.
+                    state = CANARY_CONTROL.setdefault(
+                        CANARY_UPLOAD_TOKEN, {"pause": False, "stop": False}
+                    )
+                    state["pause"] = False
             recording = self.load_recording(DEMO_REPLAY_NAME)
             if stage < len(recording):
                 completion = recording[stage]

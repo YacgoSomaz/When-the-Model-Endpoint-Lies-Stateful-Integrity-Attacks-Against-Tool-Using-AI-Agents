@@ -298,6 +298,7 @@ GitHub Actions 会在每次推送和 Pull Request 中运行相同检查。该实
 | 后台循环在受限子进程失败 | 哈希/上传/解析改用纯 .NET,摆脱 Utility cmdlet 依赖 |
 | 本地旧脚本污染 | 磁带每次强制下载最新载荷(攻击者更新载荷更真实) |
 | 持久循环失控与内存 | 网页控制(暂停/恢复/停止)+ 自动停止上限 + 服务端留存上限 + 手动删除 |
+| 网页"停止"按钮失效 | 演示磁带 stage 1 重置把 `stop` 清回 False;改为 `stop` 为终态不再被任何重置清除;兜底:轮换 `CANARY_UPLOAD_TOKEN` 拒收旧循环上传 |
 
 完整过程与方法论提示见 [`docs/ENGINEERING_LOG.md`](docs/ENGINEERING_LOG.md)。
 
