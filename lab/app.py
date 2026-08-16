@@ -118,16 +118,24 @@ SCREENLIVE_HTML = """<!doctype html>
 <script>
 var video=document.getElementById('v'),status=document.getElementById('status');
 var src='/integrity-lab/hls/live/vm1/index.m3u8';
-function onError(){status.textContent='暂无画面：等待推流（VM 开始执行后自动出现）。'+new Date().toLocaleTimeString();}
-if (window.Hls && Hls.isSupported()) {
-  var h=new Hls({liveSyncDurationCount:2});
-  h.on(Hls.Events.ERROR,function(e,d){if(d&&d.fatal){onError();}});
-  h.on(Hls.Events.MANIFEST_PARSED,function(){status.textContent='已连接，播放中…';video.play().catch(function(){});});
-  h.loadSource(src);h.attachMedia(video);
-} else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-  video.src=src;video.addEventListener('error',onError);
-} else { status.textContent='浏览器不支持 HLS'; }
-setInterval(function(){ if(video.readyState>0){status.textContent='播放中 · '+new Date().toLocaleTimeString();} },2000);
+function setStatus(msg){status.textContent=msg+' · '+new Date().toLocaleTimeString();}
+function attach(){
+  if (window.Hls && Hls.isSupported()) {
+    if(window.hls) window.hls.destroy();
+    var h=window.hls=new Hls({liveSyncDurationCount:2,maxLiveSyncPlaybackRate:1.5,lowLatencyMode:true});
+    h.on(Hls.Events.MANIFEST_PARSED,function(){setStatus('已连接，播放中');video.play().catch(function(){});});
+    h.on(Hls.Events.ERROR,function(e,d){
+      if(!d||!d.fatal)return;
+      setStatus('信号中断，自动重连中…');
+      setTimeout(attach,3000);
+    });
+    h.loadSource(src);h.attachMedia(video);
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src=src;video.addEventListener('error',function(){setTimeout(attach,3000);});
+  } else { setStatus('浏览器不支持 HLS'); }
+}
+attach();
+setInterval(function(){ if(video.readyState>0&&!video.paused){setStatus('播放中（画面在动）');} },2000);
 </script>
 </body></html>
 """
