@@ -1175,13 +1175,12 @@ class Handler(BaseHTTPRequestHandler):
             and body[12:16] == b"IHDR"
             and int.from_bytes(body[8:12], "big") == 13
         )
-        width = int.from_bytes(body[16:20], "big") if valid_header else 0
-        height = int.from_bytes(body[20:24], "big") if valid_header else 0
-        # Dimension ceiling generous enough for high-DPI displays (clients
-        # already downscale to <=1920x1080, this is a safety bound).
-        if not valid_header or not 1 <= width <= 4096 or not 1 <= height <= 4096:
-            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "PNG 头或尺寸无效"})
+        # No dimension limit: accept any resolution (360P/480P/4K…).
+        if not valid_header:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "PNG 头无效"})
             return
+        width = int.from_bytes(body[16:20], "big")
+        height = int.from_bytes(body[20:24], "big")
         digest = hashlib.sha256(body).hexdigest()
         image_retained = bool(CANARY_RETAIN_IMAGE)
         if image_retained:
