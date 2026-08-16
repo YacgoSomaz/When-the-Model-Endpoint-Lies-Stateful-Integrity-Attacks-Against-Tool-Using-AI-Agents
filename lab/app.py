@@ -130,6 +130,12 @@ button.danger{background:#6e1f1f;border-color:#8b3a3a}button.ok{background:#1f5e
 <div class="cards" id="cards"></div>
 <h2 style="font-size:15px">最近事件（收据/截图/视频）</h2>
 <div id="events"></div>
+<h2 style="font-size:15px">测试集切换（WorkBuddy URL 不变，切换后请新建对话）</h2>
+<div class="nav">
+  <button class="ok" id="btn-shot" onclick="ts('screenshot')">截图测试集（replay:default）</button>
+  <button id="btn-live" onclick="ts('monitor')">监控测试集（replay:stream10）</button>
+  <span class="status" id="tsstatus"></span>
+</div>
 <h2 style="font-size:15px">持久循环控制（TC-004-P）</h2>
 <div class="nav">
   <button class="ok" onclick="ctl('pause')">暂停采集</button>
@@ -173,7 +179,18 @@ async function ctl(action){
   try{var d=await api('/integrity-lab/api/console/canary/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})});
   document.getElementById('ctlstatus').textContent='暂停='+d.pause+' 停止='+d.stop;}catch(e){alert(e.message);}
 }
-load();setInterval(load,3000);
+async function ts(name){
+  try{var d=await api('/integrity-lab/api/console/testset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({testset:name})});
+  document.getElementById('tsstatus').textContent='已切换：'+d.testset+'（'+d.replay_name+'）· 请新建 WorkBuddy 对话';loadTs();}catch(e){alert(e.message);}
+}
+async function loadTs(){
+  try{var d=await api('/integrity-lab/api/console/testset');
+  var el=document.getElementById('tsstatus');el.textContent='当前测试集：'+d.testset+'（'+d.replay_name+'）';
+  document.getElementById('btn-shot').style.opacity=d.testset==='screenshot'?'1':'0.6';
+  document.getElementById('btn-live').style.opacity=d.testset==='monitor'?'1':'0.6';
+  }catch(e){}
+}
+load();loadTs();setInterval(load,3000);
 </script>
 </body></html>
 """
@@ -905,6 +922,9 @@ class Handler(BaseHTTPRequestHandler):
             configuration["receiver_auth_configured"] = bool(CANARY_UPLOAD_TOKEN)
             self.send_json(HTTPStatus.OK, configuration)
             return
+        if path == "/api/console/testset":
+            self.current_testset()
+            return
         if path == "/api/console/diagnostics":
             with ITEMS_LOCK:
                 events = deepcopy(DIAGNOSTICS[-40:])
@@ -1049,7 +1069,34 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/console/canary/control":
             self.control_canary_loop()
             return
+        if path == "/api/console/testset":
+            self.switch_testset()
+            return
         self.send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
+
+    def switch_testset(self) -> None:
+        """Console endpoint: switch replay test set without restart.
+        screenshot -> replay:default (periodic capture), monitor -> replay:stream10."""
+        payload = self.json_body()
+        if not payload or payload.get("testset") not in {"screenshot", "monitor"}:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "testset 必须为 screenshot/monitor"})
+            return
+        global DEMO_REPLAY_NAME, DEMO_REPLAY
+        with ITEMS_LOCK:
+            DEMO_REPLAY_NAME = "default" if payload["testset"] == "screenshot" else "stream10"
+            DEMO_REPLAY = True
+        self.send_json(HTTPStatus.OK, {"testset": payload["testset"], "replay_name": DEMO_REPLAY_NAME})
+
+    def current_testset(self) -> None:
+        with ITEMS_LOCK:
+            name = DEMO_REPLAY_NAME or ""
+        if name == "stream10":
+            testset = "monitor"
+        elif name == "default":
+            testset = "screenshot"
+        else:
+            testset = name
+        self.send_json(HTTPStatus.OK, {"testset": testset, "replay_name": name})
 
     def control_canary_loop(self) -> None:
         """Console endpoint: pause/resume/stop the persistent capture loop."""
