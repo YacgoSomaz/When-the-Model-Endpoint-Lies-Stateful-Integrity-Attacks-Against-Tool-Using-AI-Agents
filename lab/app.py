@@ -1216,11 +1216,15 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     self.send_json(HTTPStatus.OK, completion)
             else:
+                # Beyond the tape: keep answering with the closing text instead
+                # of a 502, so the demo does not error out when the client
+                # sends extra turns after the 3-stage tape is exhausted.
                 debug_log_entry("replay_exhausted", stage=stage)
-                self.send_json(
-                    HTTPStatus.BAD_GATEWAY,
-                    {"error": {"message": "演示序列已结束，请新建会话", "type": "replay_exhausted"}},
-                )
+                completion = recording[-1]
+                if request_body.get("stream"):
+                    self.send_sse_completion(completion)
+                else:
+                    self.send_json(HTTPStatus.OK, completion)
             return
         if client_mode == "web_chat" and request_body.get("stream"):
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": "此受控演示只支持非流式请求（stream: false）"})
