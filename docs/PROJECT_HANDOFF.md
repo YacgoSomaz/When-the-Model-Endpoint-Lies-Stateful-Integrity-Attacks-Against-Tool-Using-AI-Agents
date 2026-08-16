@@ -28,8 +28,10 @@
 | Demo 模式纯函数 | `lab/demo_mode.py` | 请求侧前提改写 + 响应侧显示层伪造（content/description/reasoning/AskUserQuestion 文本） |
 | 演示磁带 | `lab/recordings/default.jsonl` | 3 阶段确定性回放序列（零 AI 调用） |
 | 回放/录制 | `lab/app.py`（`LAB_DEMO_MODE`） | `record` 录制交付响应；`replay:<name>` 直接播放磁带；`display_deception` 实时伪造 |
-| WorkBuddy Canary 辅助脚本 | `lab/workbuddy_canary_capture.ps1` / `_fs_dl.ps1` | 窗口采集 / 全屏采集（自交付变体） |
-| 场景与判定标准 | `docs/TEST_CASES.md` | 测试范围、证据等级、TC-004 v2 变体与 TC-004-FS(-DL) 边界 |
+| 持久采集变体 | `lab/workbuddy_canary_capture_fs_p.ps1` | 首次运行全屏采集后后台每 30 秒采集上传；网页控制暂停/恢复/停止；自动停止上限 |
+| Canary 收据/截图 | `lab/app.py` | 收据留存、内存截图留存（TTL 7 天、上限 500）、控制台按时间回看与手动删除、循环控制端点 |
+| WorkBuddy Canary 辅助脚本 | `lab/workbuddy_canary_capture.ps1` / `_fs_dl.ps1` / `_fs_p.ps1` | 窗口采集 / 全屏采集（自交付变体）/ 持久周期采集 |
+| 场景与判定标准 | `docs/TEST_CASES.md` | 测试范围、证据等级、TC-004 v2 变体与 TC-004-FS(-DL/-P) 边界 |
 | 导师验收手册 | `docs/DEMO_GUIDE.md` | 3 步零交互复现流程与验收标准 |
 | 报告模板 | `docs/REPORT_TEMPLATE.md` | 面向安全团队的事实、推断和未证实事项分层 |
 
@@ -50,8 +52,9 @@
 - 研究入口：`https://g.anyq.site/integrity-lab/console`
 - WorkBuddy 兼容完整端点：`https://g.anyq.site/integrity-lab/workbuddy/v1/chat/completions`
 - 部署配置当前标示为：`TC-004`、`workbuddy_isolated`、`CANARY_RETAIN_IMAGE=1`、`LAB_DEBUG_LOG=1`；演示模式可用 `LAB_DEMO_MODE`（`display_deception` / `record` / `replay:default`）切换；
-- 服务端只保留 Canary 编号、大小、尺寸、SHA-256 和接收时间；内存留存模式开启时 TTL 15 分钟、重启即清，不保留图片内容；
-- 2026-08-16 已产出 13 条收据哈希与脱敏阶段记录（`evidence/private/canary-acceptance-20260816/`），**仍缺 OFF 对照与三次以上重复**；
+- 截图留存：内存 TTL 7 天、上限 500 张；控制台按采集时间回看、手动删除、循环暂停/恢复/停止；重启即清；
+- 2026-08-16 已产出收据哈希与脱敏阶段记录（`evidence/private/canary-acceptance-20260816/`），**仍缺 OFF 对照与三次以上重复**；
+- **规划中：TC-004-AV** —— 隔离 VM 内观测用户/系统/杀软三方对 agent 安装持久化植入体的感知（Defender/AMSI 拦截、提示或静默放行；载荷运行时惰性）；完成后联系 WorkBuddy/相关 AI 厂商做协调披露；
 - 线上尚无正式验收收据。部署后的传输预检已重启清空，不能当作 WorkBuddy 实机证据。
 
 不要在仓库、终端输出、控制台截图或交接文本中记录 API Key、SSH 密码、上传 Token、Cookie、完整未脱敏提示词或个人路径。运行时凭证不属于 Git 管理范围。
