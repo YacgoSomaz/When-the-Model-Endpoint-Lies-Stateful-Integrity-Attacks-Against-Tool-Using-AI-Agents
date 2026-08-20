@@ -178,8 +178,8 @@ async function load(){
     evRoot.innerHTML=ev.slice().reverse().slice(0,15).map(function(e){
       var kind=e.kind==='video'?'视频':(e.image_retained?'截图':'收据');
       var dl='';
-      if(e.kind==='video') dl='<button class="danger" onclick="del(\''+e.canary_id+'\',\'video\')">删</button>';
-      else if(e.image_retained) dl='<button class="danger" onclick="del(\''+e.canary_id+'\',\'image\')">删</button>';
+      if(e.kind==='video') dl=`<button class="danger" onclick="del('${e.canary_id}','video')">删</button>`;
+      else if(e.image_retained) dl=`<button class="danger" onclick="del('${e.canary_id}','image')">删</button>`;
       return '<div class="ev"><span class="id">'+esc(e.canary_id)+'</span><span>'+kind+'</span>'+
         '<span class="t">'+new Date((e.received_at||0)*1000).toLocaleString()+'</span>'+
         '<span class="t">'+esc(e.bytes)+'B</span><code>'+esc((e.sha256||'').slice(0,12))+'…</code>'+dl+'</div>';
@@ -222,8 +222,8 @@ async function loadCustom(){
   el.innerHTML=(d.sets||[]).map(function(n){
     var cur=d.current===n?'（当前）':'';
     return '<div class="ev"><span class="id">'+esc(n)+'</span>'+cur+
-      '<button onclick="swCustom(\''+n+'\')">切换</button>'+
-      '<button class="danger" onclick="delCustom(\''+n+'\')">删除</button></div>';
+      `<button onclick="swCustom('${n}')">切换</button>`+
+      `<button class="danger" onclick="delCustom('${n}')">删除</button></div>`;
   }).join('')||'<span class="status">暂无自定义测试集</span>';
   }catch(e){}
 }
