@@ -127,7 +127,7 @@ button{background:#21262d;border:1px solid #30363d;color:#e6edf3;border-radius:6
 button.danger{background:#6e1f1f;border-color:#8b3a3a}button.ok{background:#1f5e2e;border-color:#2ea043}
 .status{color:#58a6ff;font-size:13px;margin:8px 0}</style>
 </head><body>
-<h1>数据中台 · 模型通道完整性评估</h1>
+<h1>数据中台 · 模型通道完整性评估 <span style="font-size:12px;color:#8b949e;font-weight:400">v21d842c</span></h1>
 <div class="nav">
   <a href="console" target="_blank">控制台（审批/规则/循环控制）</a>
   <a href="screenlog" target="_blank">截图查看（周期截屏）</a>
