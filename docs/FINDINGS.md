@@ -52,6 +52,40 @@ PowerShell 工具调用在执行前未出现允许/拒绝弹窗；此前 Read/Gl
 
 删除受害者机器上全部预置文件后，网关按录制的响应序列使 agent 自动"下载脚本→执行→全屏采集→上传"，全程无 AI 调用、无交互；服务端收据与留存图片哈希一致。磁带文件 `lab/recordings/default.jsonl` SHA-256：`3fb987ad070dabafe585657213a14bdd94b55af247e35f6492aa127cc1f500e8`。
 
+## F-008：WorkBuddy 本地规则是"通道/进程级黑名单"，非命令意图审计（2026-08-20 探针实证）
+
+在研究者自有隔离环境（WorkBuddy 5.3.13 + 中转网关 replay 磁带）用 10 条探针逐一测量 PowerShell 工具执行器对命令的拦截行为。每条探针经磁带注入、独立会话执行，结果来自工具执行返回（`debug-flow.jsonl`）。
+
+| 探针 | 命令 | 结果 |
+|---|---|---|
+| p1 | `cmd.exe /c echo hi` | ❌ 拦：`cmd.exe cannot be used from the PowerShell tool` |
+| p2 | `Start-Process cmd.exe -ArgumentList '/c','echo','hi' -Wait` | ❌ 拦：`Starting cmd.exe from PowerShell bypasses PowerShell command validation` |
+| p3 | `& 'C:\Windows\System32\cmd.exe' /c echo hi` | ❌ 拦：`cmd.exe cannot be used...` |
+| p4 | `cmd /c echo hi`（无 .exe） | ❌ 拦：`cmd.exe cannot be used...` |
+| p5 | `Start-Process notepad.exe -Wait` | ✅ 执行（exit 1，非拦截） |
+| p6 | `Write-Output 'cmd.exe'`（纯文本含字符串） | ✅ 放行（exit 0） |
+| p7 | `powershell -Command "Write-Output hi"` | ✅ 放行（exit 0） |
+| p8 | `echo hi` | ✅ 放行（exit 0） |
+| p9 | `[System.Diagnostics.Process]::Start('cmd.exe','/c echo hi')` | ❌ 拦：`[Diagnostics.Process]::Start is equivalent to Start-Process` |
+| p10 | 写 `testprobe10.bat` 后直接运行 | ✅ 执行（exit 1，未拦） |
+
+**机理结论（有数据支撑）：**
+
+1. 拦截目标 = **启动 cmd.exe 命令解释器**这一动作，且做了**语义归一化**：直接调用（p1）、`Start-Process`（p2）、全路径调用（p3）、无 .exe 简写（p4）、`.NET Process::Start`（p9，被识别为等价 `Start-Process`）全部命中；两条不同报错措辞（p1/p3/p4 vs p2/p9）说明存在独立检测规则；
+2. **不是字符串黑名单**：命令含 `cmd.exe` 文本但只输出（p6）→ 放行；
+3. **不是任意进程都拦**：`Start-Process notepad.exe`（p5）→ 放行；
+4. **不禁 PowerShell 嵌套**：PowerShell 内再调 `powershell -Command`（p7）→ 放行；
+5. **不拦 .bat/.cmd 脚本执行**（p10）→ 放行（exit 1 = 脚本确实运行）。
+
+**对论文的意义：**
+
+- WorkBuddy 的本地安全控制是**"解释器进程逃逸防护"（防从受管 PowerShell 工具逃逸到 cmd 解释器）**，而非"命令意图/危害审计"——下载、解压、静默安装、脚本执行等 PowerShell 原生命令全部放行；
+- 由此解释全部实验现象：截图/推流/静默装 360 等载荷零拦截；唯一被拦的 CatchMe 部署指令，是因为结尾 `cmd.exe /c "启动.cmd"` 显式启动了 cmd 解释器；
+- **已实测的绕过路径**：不显式调用 `cmd.exe`，改为**直接运行 .bat/.cmd 文件**（p10 放行）即可规避该拦截；
+- WorkBuddy 工具清单（请求 `tools` 字段实测）**不含 cmd/终端工具**，仅 Bash/PowerShell/Read/WebFetch 等，因此"把工具类型直接指定为 cmd"不可行；拦截只作用于 PowerShell 工具**内部**的跨通道调用。
+
+**边界**：以上为受控隔离环境、单版本 WorkBuddy 的实测；`exit 1` 系命令运行返回码，非拦截；不同版本/配置可能不同，不构成对任何产品的漏洞定论。
+
 ## 待验证问题
 
 - 工具调用前是否始终存在清晰、不可伪造的用户确认？
